@@ -487,11 +487,15 @@ class SeleniumTwitterMonitor:
             try:
                 link_element = element.find_element(By.CSS_SELECTOR, 'a[href*="/status/"]')
                 href = link_element.get_attribute('href')
-                if href:
+                if href and f'/{username}/status/' in href:
+                    # Перевіряємо що посилання дійсно від потрібного користувача
                     tweet_url = href
                     # Витягуємо ID з URL
                     if '/status/' in href:
                         tweet_id = href.split('/status/')[-1].split('?')[0]
+                else:
+                    if href:
+                        logger.debug(f"Selenium: Пропущено посилання від іншого користувача: {href}")
             except NoSuchElementException:
                 pass
             
@@ -688,6 +692,7 @@ class SeleniumTwitterMonitor:
                             
                         # Додаємо до нових твітів
                         if tweet_id not in self.seen_tweets[username]:
+                            logger.info(f"🆕 Selenium: Знайдено новий твіт від {username}: {tweet_text[:50]}...")
                             new_tweets.append(tweet)
                             self.seen_tweets[username].add(tweet_id)
                             self.sent_tweets[username].add(tweet_id)
@@ -698,8 +703,6 @@ class SeleniumTwitterMonitor:
                                 content_hash = hashlib.md5(f"{username}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
                                 content_key = f"content_{content_hash}"
                                 self.sent_tweets[username].add(content_key)
-                            
-                            logger.info(f"Selenium: знайдено новий твіт {tweet_id} для {username}")
                         
             except Exception as e:
                 logger.error(f"Помилка перевірки твітів для {username}: {e}")

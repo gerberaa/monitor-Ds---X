@@ -12,7 +12,7 @@ from security_manager import SecurityManager
 from project_manager import ProjectManager
 from discord_monitor import DiscordMonitor
 from twitter_monitor import TwitterMonitor
-from selenium_twitter_monitor import SeleniumTwitterMonitor
+from twitter_monitor_adapter import TwitterMonitorAdapter
 from access_manager import access_manager
 from config import BOT_TOKEN, ADMIN_PASSWORD, SECURITY_TIMEOUT, MESSAGES, DISCORD_AUTHORIZATION, MONITORING_INTERVAL, TWITTER_AUTH_TOKEN, TWITTER_CSRF_TOKEN, TWITTER_MONITORING_INTERVAL
 
@@ -28,7 +28,7 @@ security_manager = SecurityManager(SECURITY_TIMEOUT)
 project_manager = ProjectManager()
 discord_monitor = DiscordMonitor(DISCORD_AUTHORIZATION) if DISCORD_AUTHORIZATION else None
 twitter_monitor = TwitterMonitor(TWITTER_AUTH_TOKEN, TWITTER_CSRF_TOKEN) if TWITTER_AUTH_TOKEN and TWITTER_CSRF_TOKEN else None
-selenium_twitter_monitor = None  # Ініціалізується при потребі
+twitter_monitor_adapter = None  # Twitter Monitor Adapter (заміна Selenium)
 
 # Словник для зберігання стану користувачів (очікують пароль)
 waiting_for_password = {}
@@ -73,7 +73,7 @@ def require_auth(func):
 # ===================== Синхронізація моніторів з проектами =====================
 def clean_forbidden_accounts():
     """Очистити заборонені акаунти з моніторів"""
-    forbidden_accounts = ['twitter', 'x', 'elonmusk']
+    forbidden_accounts = ['twitter', 'x']
     
     # Очищаємо Twitter монітор
     if twitter_monitor:
@@ -87,20 +87,20 @@ def clean_forbidden_accounts():
                 logger.info(f"🧹 Видалено заборонений Twitter акаунт: {account}")
         twitter_monitor.save_seen_tweets()
     
-    # Очищаємо Selenium монітор
-    if selenium_twitter_monitor:
+    # Очищаємо Twitter Monitor Adapter
+    if twitter_monitor_adapter:
         for account in forbidden_accounts:
-            if account in selenium_twitter_monitor.monitoring_accounts:
-                selenium_twitter_monitor.monitoring_accounts.discard(account)
-                if account in selenium_twitter_monitor.sent_tweets:
-                    del selenium_twitter_monitor.sent_tweets[account]
-                if account in selenium_twitter_monitor.seen_tweets:
-                    del selenium_twitter_monitor.seen_tweets[account]
-                logger.info(f"🧹 Видалено заборонений Selenium акаунт: {account}")
-        selenium_twitter_monitor.save_seen_tweets()
+            if account in twitter_monitor_adapter.monitoring_accounts:
+                twitter_monitor_adapter.monitoring_accounts.discard(account)
+                if account in twitter_monitor_adapter.sent_tweets:
+                    del twitter_monitor_adapter.sent_tweets[account]
+                if account in twitter_monitor_adapter.seen_tweets:
+                    del twitter_monitor_adapter.seen_tweets[account]
+                logger.info(f"🧹 Видалено заборонений Twitter Monitor Adapter акаунт: {account}")
+        twitter_monitor_adapter.save_seen_tweets()
 
 def sync_monitors_with_projects() -> None:
-    """Звести активні монітори до фактичних проектів і збережених Selenium акаунтів"""
+    """Звести активні монітори до фактичних проектів і збережених Twitter Monitor Adapter акаунтів"""
     try:
         # Спочатку очищаємо заборонені акаунти
         clean_forbidden_accounts()
@@ -132,11 +132,11 @@ def sync_monitors_with_projects() -> None:
         logger.info(f"   🐦 Знайдено Twitter usernames: {list(project_usernames)}")
         logger.info(f"   💬 Знайдено Discord channels: {list(discord_channels.keys())}")
 
-        # Додаємо явно збережені selenium акаунти (якщо ще є)
-        selenium_saved = set(project_manager.get_selenium_accounts() or [])
-        # Фільтруємо заборонені акаунти з Selenium
-        selenium_saved = {acc for acc in selenium_saved if acc.lower() not in ['twitter', 'x', 'elonmusk']}
-        target_usernames = project_usernames.union(selenium_saved)
+        # Додаємо явно збережені Twitter Monitor Adapter акаунти (якщо ще є)
+        twitter_adapter_saved = set(project_manager.get_selenium_accounts() or [])  # Використовуємо ту ж функцію
+        # Фільтруємо заборонені акаунти
+        twitter_adapter_saved = {acc for acc in twitter_adapter_saved if acc.lower() not in ['twitter', 'x']}
+        target_usernames = project_usernames.union(twitter_adapter_saved)
 
         # Синхронізація Twitter API монітора
         global twitter_monitor
@@ -158,18 +158,18 @@ def sync_monitors_with_projects() -> None:
                 except Exception:
                     pass
 
-        # Синхронізація Selenium монітора
-        global selenium_twitter_monitor
-        if selenium_twitter_monitor is not None:
-            current = set(getattr(selenium_twitter_monitor, 'monitoring_accounts', set()))
+        # Синхронізація Twitter Monitor Adapter (основний підхід)
+        global twitter_monitor_adapter
+        if twitter_monitor_adapter is not None:
+            current = set(getattr(twitter_monitor_adapter, 'monitoring_accounts', set()))
             # Видаляємо зайві
             for username in list(current - target_usernames):
-                selenium_twitter_monitor.monitoring_accounts.discard(username)
-                logger.info(f"🗑️ Видалено Selenium акаунт з моніторингу: {username}")
+                twitter_monitor_adapter.monitoring_accounts.discard(username)
+                logger.info(f"🗑️ Видалено Twitter Monitor Adapter акаунт з моніторингу: {username}")
             # Додаємо відсутні
             for username in list(target_usernames - current):
-                selenium_twitter_monitor.monitoring_accounts.add(username)
-                logger.info(f"➕ Додано Selenium акаунт до моніторингу: {username}")
+                twitter_monitor_adapter.add_account(username)
+                logger.info(f"➕ Додано Twitter Monitor Adapter акаунт до моніторингу: {username}")
 
         # Синхронізація Discord монітора
         global discord_monitor
@@ -216,7 +216,7 @@ def sync_monitors_with_projects() -> None:
 def auto_start_monitoring() -> None:
     """Автоматично запустити всі доступні монітори"""
     try:
-        global twitter_monitor, selenium_twitter_monitor, discord_monitor
+        global twitter_monitor, discord_monitor, twitter_monitor_adapter
         import threading
         
         # Запускаємо Twitter API моніторинг
@@ -235,21 +235,21 @@ def auto_start_monitoring() -> None:
                 except Exception as e:
                     logger.error(f"Помилка запуску Twitter моніторингу: {e}")
         
-        # Запускаємо Selenium Twitter моніторинг
-        if selenium_twitter_monitor and hasattr(selenium_twitter_monitor, 'monitoring_accounts'):
-            accounts = getattr(selenium_twitter_monitor, 'monitoring_accounts', set())
+        # Запускаємо Twitter Monitor Adapter моніторинг (основний підхід)
+        if twitter_monitor_adapter and hasattr(twitter_monitor_adapter, 'monitoring_accounts'):
+            accounts = getattr(twitter_monitor_adapter, 'monitoring_accounts', set())
             if accounts:
-                logger.info(f"🚀 Автоматично запускаємо Selenium Twitter моніторинг для {len(accounts)} акаунтів")
+                logger.info(f"🚀 Автоматично запускаємо Twitter Monitor Adapter моніторинг для {len(accounts)} акаунтів")
                 try:
                     # Запускаємо в окремому потоці якщо ще не запущено
-                    if not hasattr(auto_start_monitoring, '_selenium_started'):
-                        selenium_thread = threading.Thread(target=lambda: asyncio.run(start_selenium_twitter_monitoring()))
-                        selenium_thread.daemon = True
-                        selenium_thread.start()
-                        auto_start_monitoring._selenium_started = True
-                        logger.info("✅ Selenium Twitter моніторинг автоматично запущено")
+                    if not hasattr(auto_start_monitoring, '_twitter_adapter_started'):
+                        twitter_adapter_thread = threading.Thread(target=lambda: asyncio.run(start_twitter_monitor_adapter()))
+                        twitter_adapter_thread.daemon = True
+                        twitter_adapter_thread.start()
+                        auto_start_monitoring._twitter_adapter_started = True
+                        logger.info("✅ Twitter Monitor Adapter моніторинг автоматично запущено")
                 except Exception as e:
-                    logger.error(f"Помилка запуску Selenium моніторингу: {e}")
+                    logger.error(f"Помилка запуску Twitter Monitor Adapter моніторингу: {e}")
         
         # Запускаємо Discord моніторинг
         logger.info(f"💬 Discord монітор: {'✅ Ініціалізовано' if discord_monitor else '❌ Не ініціалізовано'}")
@@ -642,7 +642,7 @@ def get_main_menu_keyboard(user_id: Optional[int] = None) -> InlineKeyboardMarku
          InlineKeyboardButton("➕ Створити проект", callback_data="add_project")],
         
         # Моніторинг
-        [InlineKeyboardButton("🐦 Twitter", callback_data="selenium_twitter"),
+        [InlineKeyboardButton("🐦 Twitter", callback_data="twitter_adapter"),
          InlineKeyboardButton("💬 Discord", callback_data="discord_history")],
         
         # Швидкі дії
@@ -690,14 +690,14 @@ def get_projects_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
     if discord_projects:
         keyboard.append([InlineKeyboardButton("💬 Discord проекти", callback_data="discord_projects")])
     
-    # Selenium Twitter акаунти
+    # Twitter Monitor Adapter акаунти
     if selenium_accounts:
-        keyboard.append([InlineKeyboardButton("🚀 Selenium Twitter", callback_data="selenium_accounts")])
+        keyboard.append([InlineKeyboardButton("🚀 Twitter Monitor Adapter", callback_data="twitter_adapter_accounts")])
     
     # Кнопки додавання
     keyboard.append([InlineKeyboardButton("➕ Додати Twitter", callback_data="add_twitter")])
     keyboard.append([InlineKeyboardButton("➕ Додати Discord", callback_data="add_discord")])
-    keyboard.append([InlineKeyboardButton("🚀 Додати Selenium", callback_data="add_selenium")])
+    keyboard.append([InlineKeyboardButton("🚀 Додати Twitter Adapter", callback_data="add_twitter_adapter")])
     
     # Назад
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")])
@@ -744,19 +744,19 @@ def get_discord_projects_keyboard(user_id: int) -> InlineKeyboardMarkup:
     
     return InlineKeyboardMarkup(keyboard)
 
-def get_selenium_accounts_keyboard() -> InlineKeyboardMarkup:
-    """Створити клавіатуру Selenium акаунтів"""
-    selenium_accounts = project_manager.get_selenium_accounts()
+def get_twitter_adapter_accounts_keyboard() -> InlineKeyboardMarkup:
+    """Створити клавіатуру Twitter Monitor Adapter акаунтів"""
+    twitter_adapter_accounts = project_manager.get_selenium_accounts()
     
     keyboard = []
     
-    for username in selenium_accounts:
+    for username in twitter_adapter_accounts:
         keyboard.append([
-            InlineKeyboardButton(f"🚀 @{username}", callback_data=f"view_selenium_{username}"),
-            InlineKeyboardButton("❌", callback_data=f"delete_selenium_{username}")
+            InlineKeyboardButton(f"🚀 @{username}", callback_data=f"view_twitter_adapter_{username}"),
+            InlineKeyboardButton("❌", callback_data=f"delete_twitter_adapter_{username}")
         ])
     
-    keyboard.append([InlineKeyboardButton("➕ Додати Selenium", callback_data="add_selenium")])
+    keyboard.append([InlineKeyboardButton("➕ Додати Twitter Adapter", callback_data="add_twitter_adapter")])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="projects_menu")])
     
     return InlineKeyboardMarkup(keyboard)
@@ -1036,9 +1036,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if access_manager.is_authorized(user_id):
         # Оновлюємо активність сесії
         access_manager.update_session_activity(user_id)
-        # Перевіряємо статус Selenium моніторингу
-        selenium_status = "🚀 Активний" if selenium_twitter_monitor and selenium_twitter_monitor.monitoring_active else "⏸️ Неактивний"
-        selenium_count = len(selenium_twitter_monitor.monitoring_accounts) if selenium_twitter_monitor else 0
+        # Перевіряємо статус Twitter Monitor Adapter моніторингу
+        twitter_adapter_status = "🚀 Активний" if twitter_monitor_adapter and twitter_monitor_adapter.monitoring_active else "⏸️ Неактивний"
+        twitter_adapter_count = len(twitter_monitor_adapter.monitoring_accounts) if twitter_monitor_adapter else 0
         
         # Отримуємо роль користувача
         user_role = access_manager.get_user_role(user_id)
@@ -1049,8 +1049,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Привіт, {username}!",
             f"{role_emoji} **Роль:** {role_text}\n"
             "✅ Ви авторизовані в системі.\n\n"
-            f"🚀 **Selenium Twitter моніторинг:** {selenium_status}\n"
-            f"📊 **Акаунтів для моніторингу:** {selenium_count}",
+            f"🚀 **Twitter Monitor Adapter моніторинг:** {twitter_adapter_status}\n"
+            f"📊 **Акаунтів для моніторингу:** {twitter_adapter_count}",
             "Використовуйте меню нижче для навігації по всіх функціях бота."
         )
         # Видаляємо команду /start для чистоти
@@ -1285,8 +1285,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await handle_twitter_addition(update, context)
         elif user_states[user_id]['state'] == 'adding_discord':
             await handle_discord_addition(update, context)
-        elif user_states[user_id]['state'] == 'adding_selenium':
-            await handle_selenium_addition(update, context)
+        elif user_states[user_id]['state'] == 'adding_twitter_adapter':
+            await handle_twitter_adapter_addition(update, context)
         elif user_states[user_id]['state'] == 'admin_creating_user':
             await handle_admin_user_creation(update, context)
         elif user_states[user_id]['state'] == 'admin_creating_admin':
@@ -1466,10 +1466,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "💬 Discord проекти\n\nОберіть проект для управління:",
             reply_markup=get_discord_projects_keyboard(user_id)
         )
-    elif callback_data == "selenium_accounts":
+    elif callback_data == "twitter_adapter_accounts":
         await query.edit_message_text(
-            "🚀 Selenium Twitter акаунти\n\nОберіть акаунт для управління:",
-            reply_markup=get_selenium_accounts_keyboard()
+            "🚀 Twitter Monitor Adapter акаунти\n\nОберіть акаунт для управління:",
+            reply_markup=get_twitter_adapter_accounts_keyboard()
         )
     elif callback_data == "add_twitter":
         user_states[user_id] = {
@@ -1487,13 +1487,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(
             "💬 Додавання Discord каналу\n\nВведіть ID каналу:"
         )
-    elif callback_data == "add_selenium":
+    elif callback_data == "add_twitter_adapter":
         user_states[user_id] = {
-            'state': 'adding_selenium',
+            'state': 'adding_twitter_adapter',
             'data': {}
         }
         await query.edit_message_text(
-            "🚀 Додавання Selenium Twitter акаунта\n\nВведіть username акаунта (без @):"
+            "🚀 Додавання Twitter Monitor Adapter акаунта\n\nВведіть username акаунта (без @):"
         )
     elif callback_data == "platform_twitter":
         user_states[user_id] = {
@@ -1517,55 +1517,55 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "Оберіть розділ для отримання детальної інформації:",
             reply_markup=get_help_keyboard()
         )
-    elif callback_data == "selenium_twitter":
-        # Перевіряємо статус Selenium моніторингу
-        selenium_status = "🚀 Активний" if selenium_twitter_monitor and selenium_twitter_monitor.monitoring_active else "⏸️ Неактивний"
-        selenium_count = len(selenium_twitter_monitor.monitoring_accounts) if selenium_twitter_monitor else 0
+    elif callback_data == "twitter_adapter":
+        # Перевіряємо статус Twitter Monitor Adapter моніторингу
+        twitter_adapter_status = "🚀 Активний" if twitter_monitor_adapter and twitter_monitor_adapter.monitoring_active else "⏸️ Неактивний"
+        twitter_adapter_count = len(twitter_monitor_adapter.monitoring_accounts) if twitter_monitor_adapter else 0
         
-        selenium_text = (
-            "🐦 **Selenium Twitter Моніторинг**\n\n"
-            f"📊 **Статус:** {selenium_status}\n"
-            f"👥 **Акаунтів:** {selenium_count}\n"
+        twitter_adapter_text = (
+            "🐦 **Twitter Monitor Adapter Моніторинг**\n\n"
+            f"📊 **Статус:** {twitter_adapter_status}\n"
+            f"👥 **Акаунтів:** {twitter_adapter_count}\n"
             f"🔄 **Автозапуск:** ✅ Увімкнено\n\n"
             "🔧 **Доступні команди:**\n"
-            "• `/selenium_auth` - Авторизація в Twitter\n"
-            "• `/selenium_add username` - Додати акаунт\n"
-            "• `/selenium_test username` - Тестувати моніторинг\n"
-            "• `/selenium_start` - Запустити моніторинг\n"
-            "• `/selenium_stop` - Зупинити моніторинг\n\n"
+            "• `/twitter_add username` - Додати акаунт\n"
+            "• `/twitter_test username` - Тестувати моніторинг\n"
+            "• `/twitter_start` - Запустити моніторинг\n"
+            "• `/twitter_stop` - Зупинити моніторинг\n"
+            "• `/twitter_remove username` - Видалити акаунт\n\n"
             "📝 **Приклад використання:**\n"
-            "1. `/selenium_auth` - увійдіть в Twitter\n"
-            "2. `/selenium_add pilk_xz` - додайте акаунт\n"
-            "3. `/selenium_test pilk_xz` - протестуйте\n"
+            "1. `/twitter_add pilk_xz` - додайте акаунт\n"
+            "2. `/twitter_test pilk_xz` - протестуйте\n"
+            "3. `/twitter_start` - запустіть моніторинг\n"
             "4. Моніторинг запуститься автоматично!\n\n"
-            "💡 **Переваги Selenium:**\n"
-            "• Реальний браузер\n"
-            "• Авторизований доступ\n"
+            "💡 **Переваги Twitter Monitor Adapter:**\n"
+            "• Швидкий API доступ\n"
             "• Надійний парсинг\n"
+            "• Автоматичне оновлення\n"
             "• Обхід обмежень API\n"
             "• Автоматичний запуск з ботом"
         )
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")]]
         await query.edit_message_text(
-            selenium_text,
+            twitter_adapter_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
-    elif callback_data.startswith("delete_selenium_"):
-        username = callback_data.replace("delete_selenium_", "")
+    elif callback_data.startswith("delete_twitter_adapter_"):
+        username = callback_data.replace("delete_twitter_adapter_", "")
         try:
             project_manager.remove_selenium_account(username)
-            if selenium_twitter_monitor:
-                selenium_twitter_monitor.remove_account(username)
+            if twitter_monitor_adapter:
+                twitter_monitor_adapter.remove_account(username)
             # Синхронізація після змін
             sync_monitors_with_projects()
             await query.edit_message_text(
-                f"✅ Selenium акаунт @{username} успішно видалено!",
-                reply_markup=get_selenium_accounts_keyboard()
+                f"✅ Twitter Monitor Adapter акаунт @{username} успішно видалено!",
+                reply_markup=get_twitter_adapter_accounts_keyboard()
             )
         except Exception as e:
             await query.edit_message_text(
                 f"❌ Помилка видалення акаунта: {e}",
-                reply_markup=get_selenium_accounts_keyboard()
+                reply_markup=get_twitter_adapter_accounts_keyboard()
             )
     elif callback_data.startswith("view_twitter_"):
         project_id = int(callback_data.replace("view_twitter_", ""))
@@ -1603,20 +1603,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
-    elif callback_data.startswith("view_selenium_"):
-        username = callback_data.replace("view_selenium_", "")
-        selenium_accounts = project_manager.get_selenium_accounts()
-        if username in selenium_accounts:
+    elif callback_data.startswith("view_twitter_adapter_"):
+        username = callback_data.replace("view_twitter_adapter_", "")
+        twitter_adapter_accounts = project_manager.get_selenium_accounts()
+        if username in twitter_adapter_accounts:
             account_data = project_manager.data['selenium_accounts'][username]
-            text = f"🚀 **Selenium Twitter: @{username}**\n\n"
+            text = f"🚀 **Twitter Monitor Adapter: @{username}**\n\n"
             text += f"📅 **Додано:** {account_data.get('added_at', 'Невідомо')}\n"
             text += f"👤 **Додав:** {account_data.get('added_by', 'Невідомо')}\n"
             text += f"🔄 **Статус:** {'Активний' if account_data.get('is_active', True) else 'Неактивний'}\n"
             text += f"⏰ **Остання перевірка:** {account_data.get('last_checked', 'Ніколи')}"
             
             keyboard = [
-                [InlineKeyboardButton("❌ Видалити", callback_data=f"delete_selenium_{username}")],
-                [InlineKeyboardButton("⬅️ Назад", callback_data="selenium_accounts")]
+                [InlineKeyboardButton("❌ Видалити", callback_data=f"delete_twitter_adapter_{username}")],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="twitter_adapter_accounts")]
             ]
             await query.edit_message_text(
                 text,
@@ -2004,10 +2004,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     twitter_monitor.remove_account(removed_username)
             except Exception:
                 pass
-            if selenium_twitter_monitor and removed_username and removed_username in getattr(selenium_twitter_monitor, 'monitoring_accounts', set()):
-                selenium_twitter_monitor.monitoring_accounts.discard(removed_username)
-                if removed_username in selenium_twitter_monitor.seen_tweets:
-                    del selenium_twitter_monitor.seen_tweets[removed_username]
+            if twitter_monitor_adapter and removed_username and removed_username in getattr(twitter_monitor_adapter, 'monitoring_accounts', set()):
+                twitter_monitor_adapter.monitoring_accounts.discard(removed_username)
+                if removed_username in twitter_monitor_adapter.seen_tweets:
+                    del twitter_monitor_adapter.seen_tweets[removed_username]
             # Також приберемо із збережених Selenium акаунтів, якщо це був він
             try:
                 if removed_username:
@@ -2150,7 +2150,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"📋 Всього проектів: {stats['total_projects']}\n"
                 f"🐦 Twitter проектів: {stats['twitter_projects']}\n"
                 f"💬 Discord проектів: {stats['discord_projects']}\n"
-                f"🚀 Selenium акаунтів: {stats['selenium_accounts']}\n\n"
+                f"🚀 Twitter Monitor Adapter акаунтів: {stats['selenium_accounts']}\n\n"
                 f"👑 **Адміністраторів:** {len(access_manager.get_all_admins())}\n"
                 f"👤 **Звичайних користувачів:** {len(access_manager.get_all_users_by_role('user'))}"
             )
@@ -2718,7 +2718,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             # Отримуємо статус моніторингу
             discord_status = "🟢 Активний" if discord_monitor else "🔴 Неактивний"
             twitter_status = "🟢 Активний" if twitter_monitor else "🔴 Неактивний"
-            selenium_status = "🟢 Активний" if selenium_twitter_monitor else "🔴 Неактивний"
+            twitter_adapter_status = "🟢 Активний" if twitter_monitor_adapter else "🔴 Неактивний"
             
             status_text = (
                 f"📈 **Статус моніторингу**\n\n"
@@ -2729,9 +2729,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"🐦 **Twitter моніторинг:**\n"
                 f"• Статус: {twitter_status}\n"
                 f"• Авторизація: {'✅ Налаштована' if TWITTER_AUTH_TOKEN else '❌ Не налаштована'}\n\n"
-                f"🔧 **Selenium Twitter:**\n"
-                f"• Статус: {selenium_status}\n"
-                f"• Профіль браузера: {'✅ Налаштований' if os.path.exists('browser_profile') else '❌ Не налаштований'}\n\n"
+                f"🔧 **Twitter Monitor Adapter:**\n"
+                f"• Статус: {twitter_adapter_status}\n"
+                f"• База даних: {'✅ Налаштована' if os.path.exists('./twitter_monitor/accounts.db') else '❌ Не налаштована'}\n\n"
                 f"⏰ **Остання перевірка:** {datetime.now().strftime('%H:%M:%S')}\n"
                 f"🔄 **Інтервал перевірки:** {MONITORING_INTERVAL} секунд"
             )
@@ -2782,7 +2782,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "📋 **Що буде перезапущено:**\n"
             "• Discord моніторинг\n"
             "• Twitter моніторинг\n"
-            "• Selenium Twitter\n"
+            "• Twitter Monitor Adapter\n"
             "• Всі активні сесії\n\n"
             "⚠️ **Примітка:** Функція перезапуску буде додана в наступних версіях\n"
             "Поки що перезапустіть бот вручну.",
@@ -2959,7 +2959,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "• Автоматичне пересилання повідомлень\n"
             "• Система безпеки з авторизацією\n"
             "• Адміністративна панель\n"
-            "• Selenium для обходу обмежень\n\n"
+            "• Twitter Monitor Adapter для обходу обмежень\n\n"
             "👨‍💻 **Розробник:** megymin\n"
             "📅 **Останнє оновлення:** 2025"
         )
@@ -2978,7 +2978,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 "🚀 **Всі монітори запущено!**\n\n"
                 "✅ Twitter API моніторинг активний\n"
-                "✅ Selenium Twitter моніторинг активний\n"
+                "✅ Twitter Monitor Adapter моніторинг активний\n"
                 "✅ Discord моніторинг активний\n"
                 "✅ Автоматичні сповіщення увімкнено",
                 reply_markup=get_quick_actions_keyboard(user_id)
@@ -2991,8 +2991,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     elif callback_data == "stop_all_monitors":
         try:
             # Зупиняємо всі монітори
-            if selenium_twitter_monitor:
-                selenium_twitter_monitor.monitoring_active = False
+            if twitter_monitor_adapter:
+                twitter_monitor_adapter.monitoring_active = False
             
             # Зупиняємо Twitter API моніторинг
             if twitter_monitor:
@@ -3005,7 +3005,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(
                 "⏹️ **Всі монітори зупинено!**\n\n"
                 "🔴 Twitter API моніторинг зупинено\n"
-                "🔴 Selenium Twitter моніторинг зупинено\n"
+                "🔴 Twitter Monitor Adapter моніторинг зупинено\n"
                 "🔴 Discord моніторинг зупинено\n"
                 "🔴 Автоматичні сповіщення вимкнено",
                 reply_markup=get_quick_actions_keyboard(user_id)
@@ -3021,14 +3021,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             user_projects = project_manager.get_user_projects(user_id)
             twitter_count = len([p for p in user_projects if p['platform'] == 'twitter'])
             discord_count = len([p for p in user_projects if p['platform'] == 'discord'])
-            selenium_count = len(project_manager.get_selenium_accounts())
+            twitter_adapter_count = len(project_manager.get_selenium_accounts())
             
             quick_stats_text = (
                 "📊 **Швидка статистика**\n\n"
                 f"👤 **Ваші проекти:**\n"
                 f"• Twitter: {twitter_count}\n"
                 f"• Discord: {discord_count}\n"
-                f"• Selenium: {selenium_count}\n\n"
+                f"• Twitter Monitor Adapter: {twitter_adapter_count}\n\n"
                 f"🌐 **Загальна статистика:**\n"
                 f"• Всього користувачів: {stats.get('total_users', 0)}\n"
                 f"• Всього проектів: {stats.get('total_projects', 0)}\n"
@@ -3089,14 +3089,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "**Формат посилань:**\n"
             "• https://twitter.com/username\n"
             "• https://x.com/username\n\n"
-            "**Selenium моніторинг:**\n"
+            "**Twitter Monitor Adapter моніторинг:**\n"
             "• Обходить обмеження API\n"
             "• Автоматичний запуск\n"
             "• Підтримка зображень\n\n"
             "**Команди:**\n"
-            "• /selenium_start - запустити\n"
-            "• /selenium_stop - зупинити\n"
-            "• /selenium_add username - додати акаунт"
+            "• /twitter_start - запустити\n"
+            "• /twitter_stop - зупинити\n"
+            "• /twitter_add username - додати акаунт"
         )
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="help")]]
         await query.edit_message_text(help_text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -3136,7 +3136,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         help_text = (
             "❓ **Часті питання**\n\n"
             "**Q: Чому не працює Twitter моніторинг?**\n"
-            "A: Спробуйте Selenium моніторинг - він обходить обмеження API\n\n"
+            "A: Спробуйте Twitter Monitor Adapter моніторинг - він обходить обмеження API\n\n"
             "**Q: Як налаштувати Discord?**\n"
             "A: Потрібен AUTHORIZATION токен в .env файлі\n\n"
             "**Q: Сесія постійно закінчується**\n"
@@ -3176,7 +3176,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"**Поточні налаштування:**\n"
             f"• Discord: {MONITORING_INTERVAL} секунд\n"
             f"• Twitter: {TWITTER_MONITORING_INTERVAL} секунд\n"
-            f"• Selenium: 30 секунд\n\n"
+            f"• Twitter Monitor Adapter: 30 секунд\n\n"
             "⚠️ **Примітка:** Зміна інтервалів буде додана в наступних версіях.\n"
             "Поки що інтервали налаштовуються в config.py"
         )
@@ -3362,14 +3362,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             user_projects = project_manager.get_user_projects(user_id)
             twitter_count = len([p for p in user_projects if p['platform'] == 'twitter'])
             discord_count = len([p for p in user_projects if p['platform'] == 'discord'])
-            selenium_count = len(project_manager.get_selenium_accounts())
+            twitter_adapter_count = len(project_manager.get_selenium_accounts())
             
             stats_text = format_info_message(
                 "Ваша статистика",
                 f"📊 Ваші проекти:\n"
                 f"• Twitter: {twitter_count}\n"
                 f"• Discord: {discord_count}\n"
-                f"• Selenium: {selenium_count}\n\n"
+                f"• Twitter Monitor Adapter: {twitter_adapter_count}\n\n"
                 f"🌐 Загальна статистика:\n"
                 f"• Всього користувачів: {stats.get('total_users', 0)}\n"
                 f"• Всього проектів: {stats.get('total_projects', 0)}\n"
@@ -4537,8 +4537,8 @@ async def handle_admin_forward_set_channel(update: Update, context: ContextTypes
     else:
         await update.message.reply_text("❌ Не вдалося зберегти канал.")
 
-async def handle_selenium_addition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник додавання Selenium Twitter акаунта"""
+async def handle_twitter_adapter_addition(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обробник додавання Twitter Monitor Adapter акаунта"""
     if not update.effective_user or not update.message or not update.message.text:
         return
     
@@ -4546,9 +4546,9 @@ async def handle_selenium_addition(update: Update, context: ContextTypes.DEFAULT
     username = update.message.text.strip().replace('@', '')
     
     try:
-        # Додаємо до Selenium моніторингу
-        if selenium_twitter_monitor:
-            selenium_twitter_monitor.add_account(username)
+        # Додаємо до Twitter Monitor Adapter моніторингу
+        if twitter_monitor_adapter:
+            twitter_monitor_adapter.add_account(username)
         
         # Додаємо до проектного менеджера
         project_manager.add_selenium_account(username, user_id)
@@ -4557,16 +4557,16 @@ async def handle_selenium_addition(update: Update, context: ContextTypes.DEFAULT
         sync_monitors_with_projects()
         
         await update.message.reply_text(
-            f"✅ **Selenium Twitter акаунт успішно додано!**\n\n"
+            f"✅ **Twitter Monitor Adapter акаунт успішно додано!**\n\n"
             f"🚀 **Username:** @{username}\n"
             f"🔗 **URL:** https://x.com/{username}\n\n"
-            f"Акаунт додано до Selenium моніторингу.",
-            reply_markup=get_selenium_accounts_keyboard(),
+            f"Акаунт додано до Twitter Monitor Adapter моніторингу.",
+            reply_markup=get_twitter_adapter_accounts_keyboard(),
         )
     except Exception as e:
         await update.message.reply_text(
             f"❌ Помилка: {str(e)}",
-            reply_markup=get_selenium_accounts_keyboard()
+            reply_markup=get_twitter_adapter_accounts_keyboard()
         )
     
     # Очищаємо стан
@@ -4950,9 +4950,11 @@ def handle_twitter_notifications_sync(new_tweets: List[Dict]) -> None:
         
     try:
         # Швидка обробка твітів
+        logger.info(f"📨 handle_twitter_notifications_sync: отримано {len(new_tweets)} твітів для обробки")
         for tweet in new_tweets:
             tweet_id = tweet.get('tweet_id', '')
             account = tweet.get('account', '')
+            logger.info(f"🔍 Обробляємо твіт {tweet_id} від {account}")
             
             # Отримуємо всіх користувачів, які відстежують цей Twitter акаунт, та мають ввімкнене пересилання
             users_with_forwarding: List[int] = []
@@ -5062,6 +5064,7 @@ def handle_twitter_notifications_sync(new_tweets: List[Dict]) -> None:
                     response = requests.post(url, data=data, timeout=3)
                     
                     if response.status_code == 200:
+                        logger.info(f"✅ Успішно відправлено твіт {tweet_id} від {account} користувачу {user_id}")
                         # Відправляємо зображення якщо є
                         if images:
                             logger.info(f"📷 Знайдено {len(images)} зображень для відправки в канал {forward_channel}")
@@ -5176,36 +5179,29 @@ async def start_twitter_monitoring():
     except Exception as e:
         logger.error(f"Помилка моніторингу Twitter: {e}")
 
-async def start_selenium_twitter_monitoring():
-    """Запустити Selenium Twitter моніторинг"""
-    global selenium_twitter_monitor
+async def start_twitter_monitor_adapter():
+    """Запустити Twitter Monitor Adapter моніторинг"""
+    global twitter_monitor_adapter
     
-    if not selenium_twitter_monitor:
-        logger.warning("Selenium Twitter монітор не ініціалізовано")
+    if not twitter_monitor_adapter:
+        logger.warning("Twitter Monitor Adapter не ініціалізовано")
         return
     
-    # Перевіряємо чи драйвер ініціалізовано
-    if not selenium_twitter_monitor.driver:
-        logger.warning("Selenium драйвер не ініціалізовано, спробуємо ініціалізувати...")
-        if not selenium_twitter_monitor._setup_driver(headless=True):
-            logger.error("Не вдалося ініціалізувати Selenium драйвер, пропускаємо моніторинг")
-            return
-        
     try:
-        selenium_twitter_monitor.monitoring_active = True
+        twitter_monitor_adapter.monitoring_active = True
         
-        if selenium_twitter_monitor.monitoring_accounts:
-            accounts_list = list(selenium_twitter_monitor.monitoring_accounts)
-            logger.info(f"🚀 Запуск Selenium Twitter моніторингу для акаунтів: {accounts_list}")
-            logger.info("🔄 Selenium моніторинг активний та працює в фоновому режимі...")
+        if twitter_monitor_adapter.monitoring_accounts:
+            accounts_list = list(twitter_monitor_adapter.monitoring_accounts)
+            logger.info(f"🚀 Запуск Twitter Monitor Adapter моніторингу для акаунтів: {accounts_list}")
+            logger.info("🔄 Twitter Monitor Adapter моніторинг активний та працює в фоновому режимі...")
         else:
-            logger.info("🚀 Selenium Twitter моніторинг запущено (очікує додавання акаунтів)")
+            logger.info("🚀 Twitter Monitor Adapter моніторинг запущено (очікує додавання акаунтів)")
         
         # Основний цикл моніторингу
-        while selenium_twitter_monitor.monitoring_active:
+        while twitter_monitor_adapter.monitoring_active:
             try:
-                # Отримуємо нові твіти через Selenium
-                new_tweets = await selenium_twitter_monitor.check_new_tweets()
+                # Отримуємо нові твіти через Twitter Monitor Adapter
+                new_tweets = await twitter_monitor_adapter.check_new_tweets()
                 
                 if new_tweets:
                     # Конвертуємо формат для сумісності з існуючим кодом
@@ -5223,33 +5219,20 @@ async def start_selenium_twitter_monitoring():
                     
                     # Відправляємо сповіщення
                     handle_twitter_notifications_sync(formatted_tweets)
-                    logger.info(f"Selenium: оброблено {len(formatted_tweets)} нових твітів")
+                    logger.info(f"Twitter Monitor Adapter: оброблено {len(formatted_tweets)} нових твітів")
                 
                 # Чекаємо перед наступною перевіркою
                 await asyncio.sleep(30)
                 
             except Exception as e:
-                logger.error(f"Помилка в циклі Selenium моніторингу Twitter: {e}")
-                # Спробуємо переініціалізувати драйвер
-                try:
-                    selenium_twitter_monitor.close_driver()
-                    await asyncio.sleep(5)
-                    if selenium_twitter_monitor._setup_driver(headless=True):
-                        logger.info("Selenium драйвер переініціалізовано")
-                    else:
-                        logger.error("Не вдалося переініціалізувати Selenium драйвер")
-                except Exception as e2:
-                    logger.error(f"Помилка переініціалізації драйвера: {e2}")
+                logger.error(f"Помилка в циклі Twitter Monitor Adapter моніторингу: {e}")
+                await asyncio.sleep(30)  # Затримка перед спробою відновлення
                 
-                await asyncio.sleep(30)  # Коротша затримка при помилці
-            
     except Exception as e:
-        logger.error(f"Помилка Selenium моніторингу Twitter: {e}")
-        # Закриваємо драйвер при критичній помилці
-        try:
-            selenium_twitter_monitor.close_driver()
-        except:
-            pass
+        logger.error(f"Помилка моніторингу Twitter Monitor Adapter: {e}")
+    finally:
+        twitter_monitor_adapter.monitoring_active = False
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обробник помилок"""
@@ -5307,145 +5290,7 @@ def _get_time_ago(dt: datetime) -> str:
         logger.error(f"Помилка обчислення часу: {e}")
         return ""
 
-# Selenium Twitter команди
-@require_auth
-async def selenium_auth_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Команда для ручної авторизації в Twitter через Selenium"""
-    if not update.effective_user or not update.message:
-        return
-    
-    global selenium_twitter_monitor
-    
-    if not selenium_twitter_monitor:
-        selenium_twitter_monitor = SeleniumTwitterMonitor()
-        await selenium_twitter_monitor.__aenter__()
-    
-    await update.message.reply_text("🔐 Відкриваю браузер для авторизації в Twitter...")
-    
-    try:
-        if selenium_twitter_monitor.open_manual_auth():
-            selenium_twitter_monitor.save_profile()
-            await update.message.reply_text("✅ Авторизація завершена! Профіль збережено.")
-        else:
-            await update.message.reply_text("❌ Помилка відкриття авторизації")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Помилка авторизації: {str(e)}")
 
-@require_auth
-async def selenium_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Додати акаунт для Selenium моніторингу"""
-    if not update.effective_user or not update.message:
-        return
-    
-    global selenium_twitter_monitor
-    user_id = update.effective_user.id
-    
-    if not context.args:
-        await update.message.reply_text("❌ Вкажіть username Twitter акаунта!\n\n**Приклад:** /selenium_add pilk_xz")
-        return
-    
-    username = context.args[0].replace('@', '').strip()
-    
-    # Додаємо акаунт в базу даних
-    if project_manager.add_selenium_account(username, user_id):
-        # Синхронізуємо монітори після додавання
-        sync_monitors_with_projects()
-        
-        # Додаємо акаунт в поточний монітор
-        if not selenium_twitter_monitor:
-            selenium_twitter_monitor = SeleniumTwitterMonitor()
-            await selenium_twitter_monitor.__aenter__()
-        
-        if selenium_twitter_monitor.add_account(username):
-            await update.message.reply_text(
-                f"✅ **Додано Twitter акаунт для Selenium моніторингу:**\n\n"
-                f"• Username: @{username}\n"
-                f"• Статус: Активний\n"
-                f"• Збережено в базі даних",
-            )
-        else:
-            await update.message.reply_text(f"⚠️ Акаунт збережено в базі, але помилка додавання в монітор: @{username}")
-    else:
-        await update.message.reply_text(f"❌ Помилка збереження акаунта: @{username}")
-
-@require_auth
-async def selenium_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Тестувати Selenium моніторинг"""
-    if not update.effective_user or not update.message:
-        return
-    
-    global selenium_twitter_monitor
-    
-    if not context.args:
-        await update.message.reply_text("❌ Вкажіть username Twitter акаунта!\n\n**Приклад:** /selenium_test pilk_xz")
-        return
-    
-    username = context.args[0].replace('@', '').strip()
-    
-    if not selenium_twitter_monitor:
-        selenium_twitter_monitor = SeleniumTwitterMonitor()
-        await selenium_twitter_monitor.__aenter__()
-    
-    await update.message.reply_text(f"🔍 Тестування Selenium моніторингу для @{username}...")
-    
-    try:
-        tweets = await selenium_twitter_monitor.get_user_tweets(username, limit=3)
-        
-        if tweets:
-            result_text = f"✅ **Selenium тест успішний!**\n\nЗнайдено {len(tweets)} твітів:\n\n"
-            
-            for i, tweet in enumerate(tweets, 1):
-                text_preview = tweet['text'][:100] + "..." if len(tweet['text']) > 100 else tweet['text']
-                result_text += f"{i}. {text_preview}\n"
-                result_text += f"   🔗 [Перейти]({tweet['url']})\n\n"
-                
-            await update.message.reply_text(result_text, )
-        else:
-            await update.message.reply_text(f"❌ Твіти не знайдено для @{username}")
-            
-    except Exception as e:
-        await update.message.reply_text(f"❌ Помилка тестування: {str(e)}")
-
-@require_auth
-async def selenium_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Запустити Selenium Twitter моніторинг"""
-    if not update.effective_user or not update.message:
-        return
-    
-    global selenium_twitter_monitor
-    
-    if not selenium_twitter_monitor:
-        selenium_twitter_monitor = SeleniumTwitterMonitor()
-        await selenium_twitter_monitor.__aenter__()
-    
-    if not selenium_twitter_monitor.monitoring_accounts:
-        await update.message.reply_text("❌ Немає акаунтів для моніторингу! Додайте Twitter акаунти спочатку.")
-        return
-    
-    # Запускаємо Selenium моніторинг в окремому потоці
-    import threading
-    selenium_thread = threading.Thread(target=lambda: asyncio.run(start_selenium_twitter_monitoring()))
-    selenium_thread.daemon = True
-    selenium_thread.start()
-    # Старт після синхронізації — на всяк випадок
-    sync_monitors_with_projects()
-    
-    await update.message.reply_text("🚀 **Selenium Twitter моніторинг запущено!**\n\nБот буде перевіряти нові твіти кожні 30 секунд.", )
-
-@require_auth
-async def selenium_stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Зупинити Selenium Twitter моніторинг"""
-    if not update.effective_user or not update.message:
-        return
-    
-    global selenium_twitter_monitor
-    
-    if selenium_twitter_monitor:
-        selenium_twitter_monitor.monitoring_active = False
-        await selenium_twitter_monitor.__aexit__(None, None, None)
-        selenium_twitter_monitor = None
-    
-    await update.message.reply_text("⏹️ **Selenium Twitter моніторинг зупинено!**", )
 
 # Менеджер акаунтів
 @require_auth
@@ -5459,8 +5304,8 @@ async def accounts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Отримуємо проекти користувача
     projects = project_manager.get_user_projects(user_id)
     
-    # Отримуємо Selenium Twitter акаунти
-    selenium_accounts = project_manager.get_selenium_accounts()
+    # Отримуємо Twitter Monitor Adapter акаунти (використовуємо ту ж функцію)
+    twitter_adapter_accounts = project_manager.get_selenium_accounts()
     
     # Групуємо по платформах
     twitter_projects = [p for p in projects if p['platform'] == 'twitter']
@@ -5469,10 +5314,10 @@ async def accounts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Форматуємо список
     text = "📋 **Ваші акаунти для моніторингу:**\n\n"
     
-    # Selenium Twitter акаунти
-    if selenium_accounts:
-        text += "🚀 **Selenium Twitter акаунти:**\n"
-        for i, username in enumerate(selenium_accounts, 1):
+    # Twitter Monitor Adapter акаунти
+    if twitter_adapter_accounts:
+        text += "🚀 **Twitter Monitor Adapter акаунти:**\n"
+        for i, username in enumerate(twitter_adapter_accounts, 1):
             account_info = project_manager.get_selenium_account_info(username)
             status = "✅ Активний" if account_info and account_info.get('is_active', True) else "❌ Неактивний"
             text += f"{i}. @{username} - {status}\n"
@@ -5496,16 +5341,16 @@ async def accounts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         text += "\n"
     
     # Якщо немає акаунтів
-    if not selenium_accounts and not twitter_projects and not discord_projects:
+    if not twitter_adapter_accounts and not twitter_projects and not discord_projects:
         text += "❌ У вас немає акаунтів для моніторингу.\n\n"
         text += "Додайте акаунти через меню бота або команди:\n"
-        text += "• /selenium_add username - додати Selenium Twitter акаунт\n"
+        text += "• /twitter_add username - додати Twitter Monitor Adapter акаунт\n"
         text += "• Меню 'Додати проект' - додати звичайний проект"
     
     # Додаємо команди для управління
     text += "\n🔧 **Команди для управління:**\n"
-    text += "• /selenium_add username - додати Selenium Twitter акаунт\n"
-    text += "• /selenium_remove username - видалити Selenium Twitter акаунт\n"
+    text += "• /twitter_add username - додати Twitter Monitor Adapter акаунт\n"
+    text += "• /twitter_remove username - видалити Twitter Monitor Adapter акаунт\n"
     text += "• /remove_twitter username - видалити звичайний Twitter акаунт\n"
     text += "• /remove_discord channel_id - видалити Discord канал\n"
     text += "• /accounts - показати цей список"
@@ -5548,12 +5393,12 @@ async def remove_twitter_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"✅ Twitter акаунт @{username} видалено з моніторингу.")
         
         # Також видаляємо з активних моніторів
-        global selenium_twitter_monitor
-        if selenium_twitter_monitor and username in selenium_twitter_monitor.monitoring_accounts:
-            selenium_twitter_monitor.monitoring_accounts.discard(username)
-            if username in selenium_twitter_monitor.seen_tweets:
-                del selenium_twitter_monitor.seen_tweets[username]
-            await update.message.reply_text(f"✅ Акаунт @{username} також видалено з Selenium моніторингу.")
+        global twitter_monitor_adapter
+        if twitter_monitor_adapter and username in twitter_monitor_adapter.monitoring_accounts:
+            twitter_monitor_adapter.monitoring_accounts.discard(username)
+            if username in twitter_monitor_adapter.seen_tweets:
+                del twitter_monitor_adapter.seen_tweets[username]
+            await update.message.reply_text(f"✅ Акаунт @{username} також видалено з Twitter Monitor Adapter моніторингу.")
         global twitter_monitor
         try:
             if twitter_monitor:
@@ -5565,16 +5410,145 @@ async def remove_twitter_command(update: Update, context: ContextTypes.DEFAULT_T
     else:
         await update.message.reply_text(f"❌ Помилка видалення Twitter акаунта @{username}.")
 
+
+# Twitter Monitor Adapter команди (основний підхід)
+
 @require_auth
-async def selenium_remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Видалити Selenium Twitter акаунт з моніторингу"""
+async def twitter_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Додати акаунт для Twitter Monitor Adapter моніторингу"""
     if not update.effective_user or not update.message:
         return
     
-    global selenium_twitter_monitor
+    if not context.args:
+        await update.message.reply_text("❌ Вкажіть username Twitter акаунта!\n\n**Приклад:** /twitter_add pilk_xz")
+        return
+    
+    username = context.args[0].replace('@', '').strip()
+    
+    # Перевіряємо чи акаунт не заборонений
+    if username.lower() in ['twitter', 'x', 'elonmusk']:
+        await update.message.reply_text("❌ Заборонено моніторинг офіційного Twitter акаунта!")
+        return
+    
+    global twitter_monitor_adapter
+    
+    if not twitter_monitor_adapter:
+        twitter_monitor_adapter = TwitterMonitorAdapter()
+    
+    # Додаємо в базу даних (використовуємо ту ж функцію що і для Selenium)
+    project_manager.add_selenium_account(username)
+    
+    # Синхронізуємо монітори після додавання
+    sync_monitors_with_projects()
+    
+    # Додаємо акаунт в поточний монітор
+    if twitter_monitor_adapter.add_account(username):
+        await update.message.reply_text(
+            f"✅ **Додано Twitter акаунт для Twitter Monitor Adapter моніторингу:**\n\n"
+            f"• Username: @{username}\n"
+            f"• Збережено в базу даних\n"
+            f"• Додано до моніторингу\n\n"
+            f"🚀 Використовується новий підхід через Twitter Monitor API!"
+        )
+    else:
+        await update.message.reply_text(f"❌ Помилка додавання акаунта @{username}")
+
+@require_auth
+async def twitter_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Тестувати Twitter Monitor Adapter моніторинг"""
+    if not update.effective_user or not update.message:
+        return
     
     if not context.args:
-        await update.message.reply_text("❌ Вкажіть username Twitter акаунта!\n\n**Приклад:** /selenium_remove pilk_xz")
+        await update.message.reply_text("❌ Вкажіть username Twitter акаунта!\n\n**Приклад:** /twitter_test pilk_xz")
+        return
+    
+    username = context.args[0].replace('@', '').strip()
+    
+    global twitter_monitor_adapter
+    
+    if not twitter_monitor_adapter:
+        twitter_monitor_adapter = TwitterMonitorAdapter()
+    
+    await update.message.reply_text(f"🔍 Тестування Twitter Monitor Adapter моніторингу для @{username}...")
+    
+    try:
+        tweets = await twitter_monitor_adapter.get_user_tweets(username, limit=3)
+        
+        if tweets:
+            result_text = f"✅ **Twitter Monitor Adapter тест успішний!**\n\nЗнайдено {len(tweets)} твітів:\n\n"
+            
+            for i, tweet in enumerate(tweets, 1):
+                text_preview = tweet['text'][:100] + "..." if len(tweet['text']) > 100 else tweet['text']
+                result_text += f"{i}. {text_preview}\n"
+                result_text += f"   🔗 [Перейти]({tweet['url']})\n"
+                if tweet.get('images'):
+                    result_text += f"   📷 Зображень: {len(tweet['images'])}\n"
+                result_text += "\n"
+                
+            await update.message.reply_text(result_text)
+        else:
+            await update.message.reply_text(f"❌ Не вдалося отримати твіти для @{username}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Помилка тестування: {str(e)}")
+
+@require_auth
+async def twitter_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Запустити Twitter Monitor Adapter моніторинг"""
+    if not update.effective_user or not update.message:
+        return
+    
+    global twitter_monitor_adapter
+    
+    if not twitter_monitor_adapter:
+        twitter_monitor_adapter = TwitterMonitorAdapter()
+    
+    if not twitter_monitor_adapter.monitoring_accounts:
+        await update.message.reply_text("❌ Немає акаунтів для моніторингу! Додайте Twitter акаунти спочатку.")
+        return
+    
+    twitter_monitor_adapter.monitoring_active = True
+    
+    # Запускаємо моніторинг в окремому потоці
+    import threading
+    monitor_thread = threading.Thread(target=lambda: asyncio.run(start_twitter_monitor_adapter()))
+    monitor_thread.daemon = True
+    monitor_thread.start()
+    
+    accounts_list = list(twitter_monitor_adapter.monitoring_accounts)
+    await update.message.reply_text(
+        f"🚀 **Twitter Monitor Adapter моніторинг запущено!**\n\n"
+        f"• Акаунтів: {len(accounts_list)}\n"
+        f"• Список: @{', @'.join(accounts_list)}\n\n"
+        f"🔄 Моніторинг активний та працює в фоновому режимі..."
+    )
+
+@require_auth
+async def twitter_stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Зупинити Twitter Monitor Adapter моніторинг"""
+    if not update.effective_user or not update.message:
+        return
+    
+    global twitter_monitor_adapter
+    
+    if twitter_monitor_adapter:
+        twitter_monitor_adapter.monitoring_active = False
+        await twitter_monitor_adapter.__aexit__(None, None, None)
+        twitter_monitor_adapter = None
+    
+    await update.message.reply_text("⏹️ **Twitter Monitor Adapter моніторинг зупинено!**")
+
+@require_auth
+async def twitter_remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Видалити Twitter Monitor Adapter акаунт з моніторингу"""
+    if not update.effective_user or not update.message:
+        return
+    
+    global twitter_monitor_adapter
+    
+    if not context.args:
+        await update.message.reply_text("❌ Вкажіть username Twitter акаунта!\n\n**Приклад:** /twitter_remove pilk_xz")
         return
     
     username = context.args[0].replace('@', '').strip()
@@ -5585,19 +5559,19 @@ async def selenium_remove_command(update: Update, context: ContextTypes.DEFAULT_
         sync_monitors_with_projects()
         
         # Видаляємо з поточного монітора
-        if selenium_twitter_monitor and username in selenium_twitter_monitor.monitoring_accounts:
-            selenium_twitter_monitor.monitoring_accounts.remove(username)
-            if username in selenium_twitter_monitor.seen_tweets:
-                del selenium_twitter_monitor.seen_tweets[username]
+        if twitter_monitor_adapter and username in twitter_monitor_adapter.monitoring_accounts:
+            twitter_monitor_adapter.monitoring_accounts.discard(username)
+            if username in twitter_monitor_adapter.seen_tweets:
+                del twitter_monitor_adapter.seen_tweets[username]
         
         await update.message.reply_text(
-            f"✅ **Видалено Selenium Twitter акаунт:**\n\n"
+            f"✅ **Видалено Twitter Monitor Adapter акаунт:**\n\n"
             f"• Username: @{username}\n"
             f"• Видалено з бази даних\n"
             f"• Видалено з поточного монітора",
         )
     else:
-        await update.message.reply_text(f"❌ Акаунт @{username} не знайдено в Selenium моніторингу")
+        await update.message.reply_text(f"❌ Акаунт @{username} не знайдено в Twitter Monitor Adapter моніторингу")
 
 @require_auth
 async def remove_discord_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5858,13 +5832,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_callback_query))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Selenium Twitter команди
-    application.add_handler(CommandHandler("selenium_auth", selenium_auth_command))
-    application.add_handler(CommandHandler("selenium_add", selenium_add_command))
-    application.add_handler(CommandHandler("selenium_test", selenium_test_command))
-    application.add_handler(CommandHandler("selenium_start", selenium_start_command))
-    application.add_handler(CommandHandler("selenium_stop", selenium_stop_command))
-    application.add_handler(CommandHandler("selenium_remove", selenium_remove_command))
+    # Twitter Monitor Adapter команди (основний підхід) - реєструються пізніше
     
     # Менеджер акаунтів
     application.add_handler(CommandHandler("accounts", accounts_command))
@@ -5882,6 +5850,13 @@ def main() -> None:
     application.add_handler(CommandHandler("admin_create_user", admin_create_user_command))
     application.add_handler(CommandHandler("admin_create_admin", admin_create_admin_command))
     application.add_handler(CommandHandler("admin_users", admin_users_command))
+    
+    # Twitter Monitor Adapter команди (основний підхід)
+    application.add_handler(CommandHandler("twitter_add", twitter_add_command))
+    application.add_handler(CommandHandler("twitter_test", twitter_test_command))
+    application.add_handler(CommandHandler("twitter_start", twitter_start_command))
+    application.add_handler(CommandHandler("twitter_stop", twitter_stop_command))
+    application.add_handler(CommandHandler("twitter_remove", twitter_remove_command))
     
     application.add_error_handler(error_handler)
     
@@ -5935,19 +5910,22 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Помилка отримання статистики проектів: {e}")
     
-    # Ініціалізуємо Selenium Twitter моніторинг
-    global selenium_twitter_monitor
-    selenium_twitter_monitor = SeleniumTwitterMonitor()
+    # Ініціалізуємо Twitter Monitor Adapter (основний підхід)
+    global twitter_monitor_adapter
+    try:
+        twitter_monitor_adapter = TwitterMonitorAdapter()
+        logger.info("✅ Twitter Monitor Adapter ініціалізовано")
+        
+        # Завантажуємо збережені акаунти в адаптер
+        saved_accounts = project_manager.get_selenium_accounts()
+        if saved_accounts:
+            logger.info(f"Завантажено {len(saved_accounts)} збережених акаунтів в Twitter Monitor Adapter: {saved_accounts}")
+            for username in saved_accounts:
+                twitter_monitor_adapter.add_account(username)
+    except Exception as e:
+        logger.error(f"Помилка ініціалізації Twitter Monitor Adapter: {e}")
+        twitter_monitor_adapter = None
     
-    # Завантажуємо збережені Selenium акаунти
-    saved_accounts = project_manager.get_selenium_accounts()
-    if saved_accounts:
-        logger.info(f"Завантажено {len(saved_accounts)} збережених Selenium акаунтів: {saved_accounts}")
-        for username in saved_accounts:
-            selenium_twitter_monitor.add_account(username)
-        logger.info(f"✅ Selenium Twitter моніторинг готовий з {len(saved_accounts)} акаунтами")
-    else:
-        logger.info("ℹ️ Збережених Selenium акаунтів не знайдено")
     
     # На старті проводимо синхронізацію моніторів з проектами/базою
     # Це автоматично запустить всі монітори для існуючих проектів
@@ -5957,15 +5935,15 @@ def main() -> None:
     # Показуємо поточний стан моніторингу
     try:
         twitter_accounts = len(getattr(twitter_monitor, 'monitoring_accounts', set())) if twitter_monitor else 0
-        selenium_accounts = len(getattr(selenium_twitter_monitor, 'monitoring_accounts', set())) if selenium_twitter_monitor else 0
+        twitter_adapter_accounts = len(getattr(twitter_monitor_adapter, 'monitoring_accounts', set())) if twitter_monitor_adapter else 0
         discord_channels = len(getattr(discord_monitor, 'channels', [])) if discord_monitor else 0
         
         logger.info("📈 Поточний стан моніторингу:")
         logger.info(f"   🐦 Twitter API: {twitter_accounts} акаунтів")
-        logger.info(f"   🚀 Selenium Twitter: {selenium_accounts} акаунтів") 
+        logger.info(f"   🚀 Twitter Monitor Adapter: {twitter_adapter_accounts} акаунтів") 
         logger.info(f"   💬 Discord: {discord_channels} каналів")
         
-        total_monitoring = twitter_accounts + selenium_accounts + discord_channels
+        total_monitoring = twitter_accounts + twitter_adapter_accounts + discord_channels
         if total_monitoring > 0:
             logger.info(f"✅ Всього активних моніторів: {total_monitoring}")
             logger.info("🎯 Бот готовий до роботи та автоматично моніторить всі налаштовані проекти!")

@@ -461,15 +461,21 @@ class TwitterMonitor:
                             self.logger.debug(f"Пропущено твіт від {tweet_author}, очікували {target_username}")
                             return
                         
+                        tweet_id = obj.get('id_str', '')
+                        # Створюємо безпечний URL - завжди використовуємо правильний username
+                        safe_url = f"https://twitter.com/{username}"
+                        if tweet_id and tweet_id.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                            safe_url = f"https://twitter.com/{username}/status/{tweet_id}"
+                        
                         tweet = {
-                            'id': obj.get('id_str', ''),
+                            'id': tweet_id,
                             'text': obj.get('text', ''),
                             'created_at': obj.get('created_at', ''),
                             'user': {
                                 'screen_name': obj.get('user', {}).get('screen_name', username),
                                 'name': obj.get('user', {}).get('name', username)
                             },
-                            'url': f"https://twitter.com/{username}/status/{obj.get('id_str', '')}"
+                            'url': safe_url
                         }
                         tweets.append(tweet)
                     
@@ -497,29 +503,41 @@ class TwitterMonitor:
                             self.logger.debug(f"API v1.1: Пропущено твіт від {tweet_author}, очікували {target_username}")
                             continue
                             
+                        tweet_id = tweet_data.get('id_str', '')
+                        # Створюємо безпечний URL - завжди використовуємо правильний username
+                        safe_url = f"https://twitter.com/{username}"
+                        if tweet_id and tweet_id.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                            safe_url = f"https://twitter.com/{username}/status/{tweet_id}"
+                        
                         tweets.append({
-                            'id': tweet_data.get('id_str', ''),
+                            'id': tweet_id,
                             'text': tweet_data.get('text', ''),
                             'created_at': tweet_data.get('created_at', ''),
                             'user': {
                                 'screen_name': tweet_data.get('user', {}).get('screen_name', username),
                                 'name': tweet_data.get('user', {}).get('name', username)
                             },
-                            'url': f"https://twitter.com/{username}/status/{tweet_data.get('id_str', '')}"
+                            'url': safe_url
                         })
                 
                 # Структура Twitter API v2
                 elif 'data' in json_data:
                     for tweet_data in json_data['data']:
+                        tweet_id = tweet_data.get('id', '')
+                        # Створюємо безпечний URL - завжди використовуємо правильний username
+                        safe_url = f"https://twitter.com/{username}"
+                        if tweet_id and tweet_id.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                            safe_url = f"https://twitter.com/{username}/status/{tweet_id}"
+                        
                         tweets.append({
-                            'id': tweet_data.get('id', ''),
+                            'id': tweet_id,
                             'text': tweet_data.get('text', ''),
                             'created_at': tweet_data.get('created_at', ''),
                             'user': {
                                 'screen_name': username,
                                 'name': username
                             },
-                            'url': f"https://twitter.com/{username}/status/{tweet_data.get('id', '')}"
+                            'url': safe_url
                         })
                 
                 # Структура з entities
@@ -527,6 +545,11 @@ class TwitterMonitor:
                     entities = json_data['entities']
                     if 'tweets' in entities:
                         for tweet_id, tweet_data in entities['tweets'].items():
+                            # Створюємо безпечний URL - завжди використовуємо правильний username
+                            safe_url = f"https://twitter.com/{username}"
+                            if tweet_id and tweet_id.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                                safe_url = f"https://twitter.com/{username}/status/{tweet_id}"
+                            
                             tweets.append({
                                 'id': tweet_id,
                                 'text': tweet_data.get('full_text', ''),
@@ -535,7 +558,7 @@ class TwitterMonitor:
                                     'screen_name': username,
                                     'name': tweet_data.get('user', {}).get('name', username)
                                 },
-                                'url': f"https://twitter.com/{username}/status/{tweet_id}"
+                                'url': safe_url
                             })
             
         except Exception as e:
@@ -607,6 +630,12 @@ class TwitterMonitor:
                                 text_hash = hashlib.md5(content_for_hash).hexdigest()[:16]
                                 real_tweet_id = f"html_{text_hash}"
                             
+                            # Створюємо безпечний URL - завжди використовуємо правильний username
+                            safe_url = f"https://twitter.com/{username}"
+                            if real_tweet_id.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')):
+                                # Тільки якщо це реальний Twitter ID, створюємо посилання на конкретний твіт
+                                safe_url = f"https://twitter.com/{username}/status/{real_tweet_id}"
+                            
                             tweets.append({
                                 'id': real_tweet_id,
                                 'text': text,
@@ -615,7 +644,7 @@ class TwitterMonitor:
                                     'screen_name': username,
                                     'name': username
                                 },
-                                'url': f"https://twitter.com/{username}/status/{real_tweet_id}" if real_tweet_id.startswith(('1', '2', '3', '4', '5', '6', '7', '8', '9')) else f"https://twitter.com/{username}"
+                                'url': safe_url
                             })
                         else:
                             self.logger.debug(f"HTML: Відфільтровано твіт з невалідними посиланнями для {username}: {text[:50]}...")
@@ -697,6 +726,7 @@ class TwitterMonitor:
                         
                     # Це новий твіт
                     found_new = True
+                    self.logger.info(f"🆕 Twitter API: Знайдено новий твіт від {username}: {tweet.get('text', '')[:50]}...")
                     new_tweets.append({
                         'account': username,
                         'tweet_id': tweet_id,

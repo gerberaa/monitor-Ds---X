@@ -1,0 +1,142 @@
+615808', '1080014795157295174']
+2025-09-25 00:39:08,871 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1382688252334571550...
+2025-09-25 00:39:09,168 - discord_monitor - INFO - 📨 Discord канал 1382688252334571550: отримано 5 повідомлень
+2025-09-25 00:39:09,168 - discord_monitor - INFO - ℹ️ Канал 1382688252334571550: нових повідомлень немає
+2025-09-25 00:39:10,184 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1413243132467871839...
+2025-09-25 00:39:10,230 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8237594436:AAFniqnei4ZsWSOUi-BlBJWenEowgSXxoEA/getUpdates "HTTP/1.1 200 OK"
+2025-09-25 00:39:11,559 - discord_monitor - INFO - 📨 Discord канал 1413243132467871839: отримано 5 повідомлень
+2025-09-25 00:39:11,559 - discord_monitor - INFO - ℹ️ Канал 1413243132467871839: нових повідомлень немає
+2025-09-25 00:39:12,121 - twitter_monitor - WARNING - Unauthorized для Pi_Squared_Pi2, використовуємо HTML парсинг
+2025-09-25 00:39:12,121 - twitter_monitor - INFO - User_id не отримано для Pi_Squared_Pi2, використовуємо HTML парсинг
+2025-09-25 00:39:12,387 - twitter_monitor - INFO - Знайдено JSON дані в HTML для Pi_Squared_Pi2: 3 твітів
+2025-09-25 00:39:12,559 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1375131160212144280...
+2025-09-25 00:39:12,746 - discord_monitor - WARNING - Forbidden: немає доступу до каналу
+2025-09-25 00:39:12,746 - discord_monitor - INFO - ⚠️ Discord канал 1375131160212144280: повідомлень не знайдено
+2025-09-25 00:39:13,746 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1267785973563920494...
+2025-09-25 00:39:13,965 - discord_monitor - INFO - ⚠️ Discord канал 1267785973563920494: повідомлень не знайдено
+2025-09-25 00:39:14,543 - twitter_monitor - WARNING - Unauthorized для megymin_xz, використовуємо HTML парсинг
+2025-09-25 00:39:14,543 - twitter_monitor - INFO - User_id не отримано для megymin_xz, використовуємо HTML парсинг
+2025-09-25 00:39:14,809 - twitter_monitor - INFO - Знайдено JSON дані в HTML для megymin_xz: 3 твітів
+2025-09-25 00:39:14,965 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1298033658778615808...
+2025-09-25 00:39:15,246 - discord_monitor - INFO - 📨 Discord канал 1298033658778615808: отримано 5 повідомлень
+2025-09-25 00:39:15,246 - discord_monitor - INFO - ℹ️ Канал 1298033658778615808: нових повідомлень немає
+2025-09-25 00:39:16,278 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1080014795157295174...
+2025-09-25 00:39:16,621 - discord_monitor - INFO - 📨 Discord канал 1080014795157295174: отримано 5 повідомлень
+2025-09-25 00:39:16,621 - discord_monitor - INFO - ℹ️ Канал 1080014795157295174: нових повідомлень немає
+2025-09-25 00:39:16,621 - discord_monitor - INFO - 📊 Discord моніторинг: знайдено 0 нових повідомлень загалом
+2025-09-25 00:39:16,996 - twitter_monitor - WARNING - Unauthorized для RomeProtocol, використовуємо HTML парсинг
+2025-09-25 00:39:17,012 - twitter_monitor - INFO - User_id не отримано для RomeProtocol, використовуємо HTML парсинг
+2025-09-25 00:39:17,268 - twitter_monitor - INFO - Знайдено JSON дані в HTML для RomeProtocol: 3 твітів
+2025-09-25 00:39:19,440 - twitter_monitor - WARNING - Unauthorized для unisat_wallet, використовуємо HTML парсинг
+2025-09-25 00:39:19,440 - twitter_monitor - INFO - User_id не отримано для unisat_wallet, використовуємо HTML парсинг
+2025-09-25 00:39:19,721 - twitter_monitor - INFO - Знайдено JSON дані в HTML для unisat_wallet: 3 твітів
+2025-09-25 00:39:20,238 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8237594436:AAFniqnei4ZsWSOUi-BlBJWenEowgSXxoEA/getUpdates "HTTP/1.1 200 OK"
+2025-09-25 00:39:21,893 - twitter_monitor - WARNING - Unauthorized для D3inc, використовуємо HTML парсинг
+2025-09-25 00:39:21,893 - twitter_monitor - INFO - User_id не отримано для D3inc, використовуємо HTML парсинг
+2025-09-25 00:39:22,143 - twitter_monitor - INFO - Знайдено JSON дані в HTML для D3inc: 3 твітів
+2025-09-25 00:39:24,331 - twitter_monitor - WARNING - Unauthorized для psdnai, використовуємо HTML парсинг
+2025-09-25 00:39:24,331 - twitter_monitor - INFO - User_id не отримано для psdnai, використовуємо HTML парсинг
+2025-09-25 00:39:24,596 - twitter_monitor - INFO - Знайдено JSON дані в HTML для psdnai: 3 твітів
+2025-09-25 00:39:26,737 - twitter_monitor - WARNING - Unauthorized для GoKiteAI, використовуємо HTML парсинг
+2025-09-25 00:39:26,737 - twitter_monitor - INFO - User_id не отримано для GoKiteAI, використовуємо HTML парсинг
+2025-09-25 00:39:26,987 - twitter_monitor - INFO - Знайдено JSON дані в HTML для GoKiteAI: 3 твітів
+2025-09-25 00:39:30,252 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8237594436:AAFniqnei4ZsWSOUi-BlBJWenEowgSXxoEA/getUpdates "HTTP/1.1 200 OK"
+2025-09-25 00:39:32,377 - discord_monitor - INFO - 🔍 Перевіряємо 6 Discord каналів: ['1382688252334571550', '1413243132467871839', '1375131160212144280', '1267785973563920494', '1298033658778615808', '1080014795157295174']
+2025-09-25 00:39:32,377 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1382688252334571550...
+2025-09-25 00:39:32,628 - discord_monitor - INFO - 📨 Discord канал 1382688252334571550: отримано 5 повідомлень
+2025-09-25 00:39:32,628 - discord_monitor - INFO - ℹ️ Канал 1382688252334571550: нових повідомлень немає
+2025-09-25 00:39:33,628 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1413243132467871839...
+2025-09-25 00:39:33,831 - discord_monitor - INFO - 📨 Discord канал 1413243132467871839: отримано 5 повідомлень
+2025-09-25 00:39:33,831 - discord_monitor - INFO - ℹ️ Канал 1413243132467871839: нових повідомлень немає
+2025-09-25 00:39:34,831 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1375131160212144280...
+2025-09-25 00:39:34,987 - discord_monitor - WARNING - Forbidden: немає доступу до каналу
+2025-09-25 00:39:34,987 - discord_monitor - INFO - ⚠️ Discord канал 1375131160212144280: повідомлень не знайдено
+2025-09-25 00:39:35,990 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1267785973563920494...
+2025-09-25 00:39:36,143 - discord_monitor - INFO - ⚠️ Discord канал 1267785973563920494: повідомлень не знайдено
+2025-09-25 00:39:37,143 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1298033658778615808...
+2025-09-25 00:39:37,206 - selenium_twitter_monitor - INFO - Відкриваємо профіль: https://x.com/Pi_Squared_Pi2
+2025-09-25 00:39:37,438 - discord_monitor - INFO - 📨 Discord канал 1298033658778615808: отримано 5 повідомлень
+2025-09-25 00:39:37,443 - discord_monitor - INFO - ℹ️ Канал 1298033658778615808: нових повідомлень немає
+2025-09-25 00:39:38,445 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1080014795157295174...
+2025-09-25 00:39:38,752 - discord_monitor - INFO - 📨 Discord канал 1080014795157295174: отримано 5 повідомлень
+2025-09-25 00:39:38,753 - discord_monitor - INFO - ℹ️ Канал 1080014795157295174: нових повідомлень немає
+2025-09-25 00:39:38,753 - discord_monitor - INFO - 📊 Discord моніторинг: знайдено 0 нових повідомлень загалом
+2025-09-25 00:39:40,290 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8237594436:AAFniqnei4ZsWSOUi-BlBJWenEowgSXxoEA/getUpdates "HTTP/1.1 200 OK"
+[6128:2576:0925/003941.130:ERROR:services\audio\output_device_mixer_manager.cc:284] Adding OutputDeviceMixer failed: invalid output parameters
+2025-09-25 00:39:43,729 - selenium_twitter_monitor - INFO - Знайдено 3 елементів з селектором: [data-testid="tweet"]
+2025-09-25 00:39:44,098 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:39:44,264 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:39:44,264 - selenium_twitter_monitor - INFO - Знайдено 3 твітів для Pi_Squared_Pi2
+[8496:7000:0925/003944.336:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003944.343:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003945.477:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003945.632:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003945.791:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003945.865:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.040:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.065:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.197:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.301:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.432:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.557:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.584:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.703:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.703:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.884:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.991:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003946.993:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[6128:2576:0925/003947.053:ERROR:services\audio\output_device_mixer_manager.cc:284] Adding OutputDeviceMixer failed: invalid output parameters
+[8496:7000:0925/003947.092:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003947.202:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003947.311:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003947.721:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003948.133:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003948.325:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003948.426:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003948.534:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003948.633:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+[8496:7000:0925/003949.056:ERROR:components\page_load_metrics\browser\page_load_metrics_update_dispatcher.cc:88] Invalid response_start 0.009 s for parse_start 0.008 s
+2025-09-25 00:39:49,224 - selenium_twitter_monitor - INFO - Відкриваємо профіль: https://x.com/megymin_xz
+2025-09-25 00:39:50,308 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8237594436:AAFniqnei4ZsWSOUi-BlBJWenEowgSXxoEA/getUpdates "HTTP/1.1 200 OK"
+2025-09-25 00:39:55,711 - discord_monitor - INFO - 🔍 Перевіряємо 6 Discord каналів: ['1382688252334571550', '1413243132467871839', '1375131160212144280', '1267785973563920494', '1298033658778615808', '1080014795157295174']
+2025-09-25 00:39:55,711 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1382688252334571550...
+2025-09-25 00:39:55,837 - selenium_twitter_monitor - INFO - Знайдено 4 елементів з селектором: [data-testid="tweet"]
+2025-09-25 00:39:55,947 - discord_monitor - INFO - 📨 Discord канал 1382688252334571550: отримано 5 повідомлень
+2025-09-25 00:39:55,947 - discord_monitor - INFO - ℹ️ Канал 1382688252334571550: нових повідомлень немає
+2025-09-25 00:39:56,261 - selenium_twitter_monitor - INFO - Знайдено 3 зображень в твіті
+2025-09-25 00:39:56,462 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:39:56,681 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:39:56,869 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:39:56,869 - selenium_twitter_monitor - INFO - Знайдено 4 твітів для megymin_xz
+2025-09-25 00:39:56,869 - selenium_twitter_monitor - INFO - Відкриваємо профіль: https://x.com/RomeProtocol
+2025-09-25 00:39:56,947 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1413243132467871839...
+2025-09-25 00:39:57,124 - discord_monitor - INFO - 📨 Discord канал 1413243132467871839: отримано 5 повідомлень
+2025-09-25 00:39:57,133 - discord_monitor - INFO - ℹ️ Канал 1413243132467871839: нових повідомлень немає
+2025-09-25 00:39:57,183 - twitter_monitor - WARNING - Unauthorized для Pi_Squared_Pi2, використовуємо HTML парсинг
+2025-09-25 00:39:57,184 - twitter_monitor - INFO - User_id не отримано для Pi_Squared_Pi2, використовуємо HTML парсинг
+2025-09-25 00:39:57,434 - twitter_monitor - INFO - Знайдено JSON дані в HTML для Pi_Squared_Pi2: 3 твітів
+2025-09-25 00:39:58,134 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1375131160212144280...
+2025-09-25 00:39:58,446 - discord_monitor - WARNING - Forbidden: немає доступу до каналу
+2025-09-25 00:39:58,448 - discord_monitor - INFO - ⚠️ Discord канал 1375131160212144280: повідомлень не знайдено
+2025-09-25 00:39:59,451 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1267785973563920494...
+2025-09-25 00:39:59,612 - discord_monitor - INFO - ⚠️ Discord канал 1267785973563920494: повідомлень не знайдено
+2025-09-25 00:39:59,614 - twitter_monitor - WARNING - Unauthorized для megymin_xz, використовуємо HTML парсинг
+2025-09-25 00:39:59,616 - twitter_monitor - INFO - User_id не отримано для megymin_xz, використовуємо HTML парсинг
+2025-09-25 00:39:59,870 - twitter_monitor - INFO - Знайдено JSON дані в HTML для megymin_xz: 3 твітів
+2025-09-25 00:40:00,331 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8237594436:AAFniqnei4ZsWSOUi-BlBJWenEowgSXxoEA/getUpdates "HTTP/1.1 200 OK"
+2025-09-25 00:40:00,622 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1298033658778615808...
+[6128:2576:0925/004000.940:ERROR:services\audio\output_device_mixer_manager.cc:284] Adding OutputDeviceMixer failed: invalid output parameters
+2025-09-25 00:40:01,171 - discord_monitor - INFO - 📨 Discord канал 1298033658778615808: отримано 5 повідомлень
+2025-09-25 00:40:01,171 - discord_monitor - INFO - ℹ️ Канал 1298033658778615808: нових повідомлень немає
+2025-09-25 00:40:02,041 - twitter_monitor - WARNING - Unauthorized для RomeProtocol, використовуємо HTML парсинг
+2025-09-25 00:40:02,041 - twitter_monitor - INFO - User_id не отримано для RomeProtocol, використовуємо HTML парсинг
+2025-09-25 00:40:02,173 - discord_monitor - INFO - 🔍 Перевіряємо Discord канал 1080014795157295174...
+2025-09-25 00:40:02,309 - twitter_monitor - INFO - Знайдено JSON дані в HTML для RomeProtocol: 3 твітів
+2025-09-25 00:40:02,422 - discord_monitor - INFO - 📨 Discord канал 1080014795157295174: отримано 5 повідомлень
+2025-09-25 00:40:02,422 - discord_monitor - INFO - ℹ️ Канал 1080014795157295174: нових повідомлень немає
+2025-09-25 00:40:02,424 - discord_monitor - INFO - 📊 Discord моніторинг: знайдено 0 нових повідомлень загалом
+2025-09-25 00:40:03,456 - selenium_twitter_monitor - INFO - Знайдено 7 елементів з селектором: [data-testid="tweet"]
+2025-09-25 00:40:04,170 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:40:04,349 - selenium_twitter_monitor - INFO - Знайдено 1 зображень в твіті
+2025-09-25 00:40:04,471 - selenium_twitter_monitor - INFO - Знайдено 7 твітів для RomeProtocol
+2025-09
