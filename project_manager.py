@@ -24,6 +24,32 @@ class ProjectManager:
         self._save_interval = 30  # Зберігаємо кожні 30 секунд
         self.load_data()
         
+    def _generate_project_tag(self, project_data: Dict) -> str:
+        """Генерувати тег для проекту"""
+        try:
+            platform = project_data.get('platform', 'unknown')
+            name = project_data.get('name', 'project')
+            
+            # Очищаємо назву проекту для тега
+            clean_name = ''.join(c for c in name if c.isalnum() or c in '-_')[:10]
+            
+            if platform == 'twitter':
+                url = project_data.get('url', '')
+                if url:
+                    # Витягуємо username з URL
+                    username = url.split('/')[-1].split('?')[0]
+                    if username and username != 'twitter.com':
+                        return f"#tw_{username[:8]}"
+                return f"#tw_{clean_name}"
+            elif platform == 'discord':
+                return f"#ds_{clean_name}"
+            else:
+                return f"#{platform[:2]}_{clean_name}"
+                
+        except Exception as e:
+            self.logger.error(f"Помилка генерації тега: {e}")
+            return f"#project_{project_data.get('id', 'unknown')}"
+        
     def load_data(self) -> None:
         """Завантажити дані з файлу"""
         try:
@@ -71,23 +97,115 @@ class ProjectManager:
                     self.logger.warning(f"Користувач {user_id} намагається створити проект для {target_user_id} без дозволу")
                     return False
                 user_id = target_user_id
-            
             user_id_str = str(user_id)
             if user_id_str not in self.data['projects']:
                 self.data['projects'][user_id_str] = []
-                
             # Додаємо ID проекту та час створення
             project_data['id'] = len(self.data['projects'][user_id_str]) + 1
             project_data['created_at'] = datetime.now().isoformat()
             project_data['created_by'] = user_id  # Хто створив проект
-            
+            # Додаємо тег для проекту (якщо не вказано)
+            if 'tag' not in project_data:
+                project_data['tag'] = self._generate_project_tag(project_data)
+            # Додаємо списки адміністраторів та пінгованих користувачів, якщо не вказано
+            if 'admins' not in project_data:
+                project_data['admins'] = [user_id]  # Створювач проекту — перший адміністратор
+            if 'ping_users' not in project_data:
+                project_data['ping_users'] = []
             self.data['projects'][user_id_str].append(project_data)
+            # Автоматично створюємо thread для проекту, якщо є налаштування пересилання
+            forward_channel = self.get_forward_channel(user_id)
+            if forward_channel:
+                self.logger.info(f"🔄 Автоматично створюємо thread для проекту '{project_data['name']}'")
+                # Відкладено імпорт, щоб уникнути циклічного імпорту
+                try:
+                    from bot import create_project_thread_sync, BOT_TOKEN
+                    thread_id = create_project_thread_sync(
+                        BOT_TOKEN, 
+                        forward_channel, 
+                        project_data['name'], 
+                        project_data['tag']
+                    )
+                    if thread_id:
+                        self.set_project_thread(user_id, project_data['id'], thread_id)
+                        self.logger.info(f"✅ Автоматично створено thread {thread_id} для проекту '{project_data['name']}'")
+                    else:
+                        self.logger.warning(f"⚠️ Не вдалося автоматично створити thread для проекту '{project_data['name']}'")
+                except Exception as e:
+                    self.logger.error(f"❌ Помилка автоматичного створення thread: {e}")
             self.save_data()
             self.logger.info(f"Додано проект для користувача {user_id}: {project_data['name']}")
             return True
         except Exception as e:
             self.logger.error(f"Помилка додавання проекту: {e}")
             return False
+    # --- Методи для адміністраторів проекту ---
+    def add_project_admin(self, owner_user_id: int, project_id: int, admin_user_id: int) -> bool:
+        """Додати адміністратора до проекту"""
+        projects = self.get_user_projects(owner_user_id)
+        for project in projects:
+            if project['id'] == project_id:
+                if 'admins' not in project:
+                    project['admins'] = [owner_user_id]
+                if admin_user_id not in project['admins']:
+                    project['admins'].append(admin_user_id)
+                    self.save_data()
+                    return True
+        return False
+
+    def remove_project_admin(self, owner_user_id: int, project_id: int, admin_user_id: int) -> bool:
+        """Видалити адміністратора з проекту"""
+        projects = self.get_user_projects(owner_user_id)
+        for project in projects:
+            if project['id'] == project_id:
+                if 'admins' in project and admin_user_id in project['admins']:
+                    project['admins'].remove(admin_user_id)
+                    self.save_data()
+                    return True
+        return False
+
+    def get_project_admins(self, owner_user_id: int, project_id: int) -> list:
+        """Отримати список адміністраторів проекту"""
+        projects = self.get_user_projects(owner_user_id)
+        for project in projects:
+            if project['id'] == project_id:
+                return project.get('admins', [])
+        return []
+
+    # --- Методи для пінгованих користувачів проекту ---
+    def add_project_ping_user(self, owner_user_id: int, project_id: int, ping_user_id: int) -> bool:
+        """Додати користувача для пінгу до проекту"""
+        projects = self.get_user_projects(owner_user_id)
+        for project in projects:
+            if project['id'] == project_id:
+                if 'ping_users' not in project:
+                    project['ping_users'] = []
+                if ping_user_id not in project['ping_users']:
+                    project['ping_users'].append(ping_user_id)
+                    self.save_data()
+                    return True
+        return False
+
+    def remove_project_ping_user(self, owner_user_id: int, project_id: int, ping_user_id: int) -> bool:
+        """Видалити користувача для пінгу з проекту"""
+        projects = self.get_user_projects(owner_user_id)
+        for project in projects:
+            if project['id'] == project_id:
+                if 'ping_users' in project and ping_user_id in project['ping_users']:
+                    project['ping_users'].remove(ping_user_id)
+                    self.save_data()
+                    return True
+        return False
+
+    def get_project_ping_users(self, owner_user_id: int, project_id: int) -> list:
+        """Отримати список user_id для пінгу по проекту"""
+        projects = self.get_user_projects(owner_user_id)
+        for project in projects:
+            if project['id'] == project_id:
+                return project.get('ping_users', [])
+        return []
+            
+            # ...existing code...
             
     def get_user_projects(self, user_id: int) -> List[Dict]:
         """Отримати проекти користувача"""
@@ -195,7 +313,7 @@ class ProjectManager:
         """Отримати всі налаштування"""
         return self.data['settings']
     
-    # Методи для роботи з налаштуваннями пересилання
+    # Методи для роботи з налаштуваннями пересилання (з підтримкою thread'ів)
     def set_forward_channel(self, user_id: int, channel_id: str) -> bool:
         """Встановити канал для пересилання сповіщень"""
         try:
@@ -206,7 +324,9 @@ class ProjectManager:
             self.data['settings']['forward_settings'][user_id_str] = {
                 'channel_id': channel_id,
                 'enabled': True,
-                'created_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                'use_threads': True,  # Нова опція для thread'ів
+                'project_threads': {}  # project_id -> thread_id
             }
             self.save_data()
             self.logger.info(f"Встановлено канал пересилання для користувача {user_id}: {channel_id}")
@@ -270,8 +390,71 @@ class ProjectManager:
         return {
             'enabled': user_settings.get('enabled', False),
             'channel_id': user_settings.get('channel_id', ''),
-            'created_at': user_settings.get('created_at', '')
+            'created_at': user_settings.get('created_at', ''),
+            'use_threads': user_settings.get('use_threads', True),
+            'project_threads': user_settings.get('project_threads', {})
         }
+    
+    def set_project_thread(self, user_id: int, project_id: int, thread_id: int) -> bool:
+        """Встановити thread для проекту"""
+        try:
+            user_id_str = str(user_id)
+            if 'forward_settings' not in self.data['settings']:
+                return False
+                
+            if user_id_str not in self.data['settings']['forward_settings']:
+                return False
+                
+            user_settings = self.data['settings']['forward_settings'][user_id_str]
+            if 'project_threads' not in user_settings:
+                user_settings['project_threads'] = {}
+                
+            user_settings['project_threads'][str(project_id)] = thread_id
+            self.save_data()
+            self.logger.info(f"Встановлено thread {thread_id} для проекту {project_id} користувача {user_id}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Помилка встановлення thread для проекту: {e}")
+            return False
+    
+    def get_project_thread(self, user_id: int, project_id: int) -> Optional[int]:
+        """Отримати thread для проекту"""
+        try:
+            user_id_str = str(user_id)
+            forward_settings = self.data['settings'].get('forward_settings', {})
+            user_settings = forward_settings.get(user_id_str, {})
+            project_threads = user_settings.get('project_threads', {})
+            
+            thread_id = project_threads.get(str(project_id))
+            return int(thread_id) if thread_id else None
+        except Exception as e:
+            self.logger.error(f"Помилка отримання thread для проекту: {e}")
+            return None
+    
+    def remove_project_thread(self, user_id: int, project_id: int) -> bool:
+        """Видалити thread для проекту"""
+        try:
+            user_id_str = str(user_id)
+            if 'forward_settings' not in self.data['settings']:
+                return False
+                
+            if user_id_str not in self.data['settings']['forward_settings']:
+                return False
+                
+            user_settings = self.data['settings']['forward_settings'][user_id_str]
+            if 'project_threads' not in user_settings:
+                return True
+                
+            project_threads = user_settings['project_threads']
+            if str(project_id) in project_threads:
+                del project_threads[str(project_id)]
+                self.save_data()
+                self.logger.info(f"Видалено thread для проекту {project_id} користувача {user_id}")
+                
+            return True
+        except Exception as e:
+            self.logger.error(f"Помилка видалення thread для проекту: {e}")
+            return False
     
     # Методи для відстеження повідомлень
     def add_sent_message(self, message_id: str, channel_id: str, user_id: int) -> bool:

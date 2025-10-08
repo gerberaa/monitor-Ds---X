@@ -1,0 +1,565 @@
+{
+  "projects": {
+    "7595525097": [
+      {
+        "platform": "twitter",
+        "name": "Irys",
+        "url": "https://x.com/irys_xyz",
+        "id": 1,
+        "created_at": "2025-10-08T00:31:54.239827",
+        "created_by": 7595525097,
+        "tag": "#tw_irys_xyz"
+      },
+      {
+        "platform": "twitter",
+        "name": "Devisons_",
+        "url": "https://x.com/Devisons_",
+        "id": 2,
+        "created_at": "2025-10-08T00:48:20.024166",
+        "created_by": 7595525097,
+        "tag": "#tw_Devisons",
+        "ping_users": [
+          "7945768259"
+        ]
+      },
+      {
+        "platform": "twitter",
+        "name": "megymin_xz",
+        "url": "https://x.com/megymin_xz",
+        "id": 3,
+        "created_at": "2025-10-08T00:49:11.505461",
+        "created_by": 7595525097,
+        "tag": "#tw_megymin_"
+      },
+      {
+        "platform": "twitter",
+        "name": "SentientAGI",
+        "url": "https://x.com/SentientAGI",
+        "id": 4,
+        "created_at": "2025-10-08T00:50:54.159322",
+        "created_by": 7595525097,
+        "tag": "#tw_Sentient"
+      },
+      {
+        "platform": "twitter",
+        "name": "Frozy",
+        "url": "https://x.com/svin228695",
+        "id": 5,
+        "created_at": "2025-10-08T00:52:48.262462",
+        "created_by": 7595525097,
+        "tag": "#tw_svin2286"
+      },
+      {
+        "platform": "discord",
+        "name": "Test amb",
+        "url": "https://discord.com/channels/1408570777275469866/1413243132467871839",
+        "id": 6,
+        "created_at": "2025-10-08T00:58:16.078474",
+        "created_by": 7595525097,
+        "tag": "#ds_Testamb",
+        "ping_users": [
+          "7945768259"
+        ]
+      }
+    ]
+  },
+  "users": {
+    "7595525097": {
+      "id": 7595525097,
+      "first_name": "Meg",
+      "username": "megymin_xzz",
+      "created_at": "2025-10-08T00:31:28.810756",
+      "last_seen": "2025-10-08T01:49:05.176817"
+    }
+  },
+  "settings": {
+    "forward_settings": {
+      "7595525097": {
+        "channel_id": "-1003085810920",
+        "enabled": true,
+        "created_at": "2025-10-08T00:33:03.399073",
+        "use_threads": true,
+        "project_threads": {
+          "1": 200,
+          "2": 227,
+          "3": 242,
+          "4": 273,
+          "5": 307,
+          "6": 343
+        }
+      }
+    },
+    "sent_messages": {
+      "7595525097": {
+        "-1003085810920": [
+          {
+            "message_id": "twitter_irys_xyz_1958521229687558169_1",
+            "timestamp": "2025-10-08T00:47:16.440723"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1973965007856828647_1",
+            "timestamp": "2025-10-08T00:47:19.852566"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1973370311316775187_1",
+            "timestamp": "2025-10-08T00:47:23.105613"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1973228459204943977_1",
+            "timestamp": "2025-10-08T00:47:26.219382"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1972652654183505938_1",
+            "timestamp": "2025-10-08T00:47:28.198501"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1972502829546770775_1",
+            "timestamp": "2025-10-08T00:47:31.334667"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1968851412927889618_1",
+            "timestamp": "2025-10-08T00:47:34.435144"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1968297601733976164_1",
+            "timestamp": "2025-10-08T00:47:36.380979"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1968294694355624297_1",
+            "timestamp": "2025-10-08T00:47:44.179338"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1968160482948481478_1",
+            "timestamp": "2025-10-08T00:47:47.290798"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1968097643365544074_1",
+            "timestamp": "2025-10-08T00:47:50.553620"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1967399008113987898_1",
+            "timestamp": "2025-10-08T00:47:53.802513"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1966020505455980589_1",
+            "timestamp": "2025-10-08T00:47:56.936080"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1965635366611829180_1",
+            "timestamp": "2025-10-08T00:48:00.353407"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1963638692435615893_1",
+            "timestamp": "2025-10-08T00:48:03.799937"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1962924401323598032_1",
+            "timestamp": "2025-10-08T00:48:06.970443"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1962659234870386785_1",
+            "timestamp": "2025-10-08T00:48:10.323650"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1961778902537294002_1",
+            "timestamp": "2025-10-08T00:48:12.260624"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1961456218654023925_1",
+            "timestamp": "2025-10-08T00:48:14.187845"
+          },
+          {
+            "message_id": "twitter_irys_xyz_1961400439276278231_1",
+            "timestamp": "2025-10-08T00:48:17.363568"
+          },
+          {
+            "message_id": "twitter_Devisons__1971009987381207115_2",
+            "timestamp": "2025-10-08T00:48:32.359640"
+          },
+          {
+            "message_id": "twitter_Devisons__1970552515327603150_2",
+            "timestamp": "2025-10-08T00:48:34.335454"
+          },
+          {
+            "message_id": "twitter_Devisons__1970248922250588606_2",
+            "timestamp": "2025-10-08T00:48:36.337801"
+          },
+          {
+            "message_id": "twitter_Devisons__1969916150378123521_2",
+            "timestamp": "2025-10-08T00:48:39.615125"
+          },
+          {
+            "message_id": "twitter_Devisons__1969916160721244327_2",
+            "timestamp": "2025-10-08T00:48:44.615213"
+          },
+          {
+            "message_id": "twitter_Devisons__1969916162684178600_2",
+            "timestamp": "2025-10-08T00:48:46.564529"
+          },
+          {
+            "message_id": "twitter_Devisons__1969877923227218372_2",
+            "timestamp": "2025-10-08T00:48:49.769287"
+          },
+          {
+            "message_id": "twitter_Devisons__1969872420002554265_2",
+            "timestamp": "2025-10-08T00:48:52.999385"
+          },
+          {
+            "message_id": "twitter_Devisons__1969867827826851952_2",
+            "timestamp": "2025-10-08T00:48:54.932791"
+          },
+          {
+            "message_id": "twitter_Devisons__1969867712198488202_2",
+            "timestamp": "2025-10-08T00:48:57.011939"
+          },
+          {
+            "message_id": "twitter_Devisons__1969867386062016690_2",
+            "timestamp": "2025-10-08T00:49:00.234511"
+          },
+          {
+            "message_id": "twitter_Devisons__1969854097592385965_2",
+            "timestamp": "2025-10-08T00:49:03.392365"
+          },
+          {
+            "message_id": "twitter_Devisons__1969854099471352040_2",
+            "timestamp": "2025-10-08T00:49:05.318467"
+          },
+          {
+            "message_id": "twitter_Devisons__1969852691926094238_2",
+            "timestamp": "2025-10-08T00:49:08.485521"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1969778659499102254_3",
+            "timestamp": "2025-10-08T00:49:32.990310"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1972696322928169117_3",
+            "timestamp": "2025-10-08T00:49:34.939502"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1972662104785305854_3",
+            "timestamp": "2025-10-08T00:49:38.312147"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1972696186692702524_3",
+            "timestamp": "2025-10-08T00:49:40.296774"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1972674042693144755_3",
+            "timestamp": "2025-10-08T00:49:43.513003"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1972655382934728871_3",
+            "timestamp": "2025-10-08T00:49:45.472180"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971931458211402135_3",
+            "timestamp": "2025-10-08T00:49:48.797701"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1972242764361498773_3",
+            "timestamp": "2025-10-08T00:49:51.993037"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971711948376146019_3",
+            "timestamp": "2025-10-08T00:49:53.950806"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1964108418073170108_3",
+            "timestamp": "2025-10-08T00:50:00.191337"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971710668446261375_3",
+            "timestamp": "2025-10-08T00:50:03.487448"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971495335248949735_3",
+            "timestamp": "2025-10-08T00:50:05.504946"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1968851412927889618_3",
+            "timestamp": "2025-10-08T00:50:08.586483"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971493969210245395_3",
+            "timestamp": "2025-10-08T00:50:11.870547"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971494610087350585_3",
+            "timestamp": "2025-10-08T00:50:15.238297"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971316047753117921_3",
+            "timestamp": "2025-10-08T00:50:18.801990"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971243037847421239_3",
+            "timestamp": "2025-10-08T00:50:22.426703"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1971224008961163742_3",
+            "timestamp": "2025-10-08T00:50:26.408467"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1970907677166547302_3",
+            "timestamp": "2025-10-08T00:50:30.374838"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1970896587330380057_3",
+            "timestamp": "2025-10-08T00:50:34.013358"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1970487859913052651_3",
+            "timestamp": "2025-10-08T00:50:37.649176"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1970449092334543326_3",
+            "timestamp": "2025-10-08T00:50:41.788470"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1970165326861234195_3",
+            "timestamp": "2025-10-08T00:50:45.282826"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1970035915826360434_3",
+            "timestamp": "2025-10-08T00:50:48.772181"
+          },
+          {
+            "message_id": "twitter_megymin_xz_1969782993234600004_3",
+            "timestamp": "2025-10-08T00:50:50.808465"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1975631389942034751_4",
+            "timestamp": "2025-10-08T00:51:11.899919"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1975552418797789690_4",
+            "timestamp": "2025-10-08T00:51:13.878724"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1974573422211379507_4",
+            "timestamp": "2025-10-08T00:51:15.957276"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1972965858571059577_4",
+            "timestamp": "2025-10-08T00:51:23.600915"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1972932209217871983_4",
+            "timestamp": "2025-10-08T00:51:25.685310"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1972932246484164780_4",
+            "timestamp": "2025-10-08T00:51:27.660748"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1971959303516180661_4",
+            "timestamp": "2025-10-08T00:51:35.488927"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1971213433124290983_4",
+            "timestamp": "2025-10-08T00:51:40.575492"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1971213177795781104_4",
+            "timestamp": "2025-10-08T00:51:50.089744"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1970788606337065428_4",
+            "timestamp": "2025-10-08T00:51:53.441716"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1963920381619720448_4",
+            "timestamp": "2025-10-08T00:51:57.414799"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1970489382001156116_4",
+            "timestamp": "2025-10-08T00:51:59.503449"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1970488368569163975_4",
+            "timestamp": "2025-10-08T00:52:03.455517"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1969015355927335351_4",
+            "timestamp": "2025-10-08T00:52:06.719427"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1968749526480552374_4",
+            "timestamp": "2025-10-08T00:52:10.016642"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1968357713890656469_4",
+            "timestamp": "2025-10-08T00:52:16.876390"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1968044665346949406_4",
+            "timestamp": "2025-10-08T00:52:20.477681"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1968044672649187635_4",
+            "timestamp": "2025-10-08T00:52:23.971651"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1968044801422659804_4",
+            "timestamp": "2025-10-08T00:52:26.012159"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1967966196646711530_4",
+            "timestamp": "2025-10-08T00:52:28.066937"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1967965812393701455_4",
+            "timestamp": "2025-10-08T00:52:31.714432"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1967618847072219334_4",
+            "timestamp": "2025-10-08T00:52:33.650027"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1967618432901566653_4",
+            "timestamp": "2025-10-08T00:52:36.973227"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1966540594915975516_4",
+            "timestamp": "2025-10-08T00:52:52.067639"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1971157569189315038_4",
+            "timestamp": "2025-10-08T00:52:55.579926"
+          },
+          {
+            "message_id": "twitter_svin228695_1975593649497935931_5",
+            "timestamp": "2025-10-08T00:53:18.514405"
+          },
+          {
+            "message_id": "twitter_svin228695_1975579689168073041_5",
+            "timestamp": "2025-10-08T00:53:25.306155"
+          },
+          {
+            "message_id": "twitter_svin228695_1973222170382967172_5",
+            "timestamp": "2025-10-08T00:53:29.627146"
+          },
+          {
+            "message_id": "twitter_svin228695_1973451071667446017_5",
+            "timestamp": "2025-10-08T00:53:33.310184"
+          },
+          {
+            "message_id": "twitter_svin228695_1973045318997717335_5",
+            "timestamp": "2025-10-08T00:53:37.280793"
+          },
+          {
+            "message_id": "twitter_svin228695_1973059856014721419_5",
+            "timestamp": "2025-10-08T00:53:41.251331"
+          },
+          {
+            "message_id": "twitter_svin228695_1972697928696221773_5",
+            "timestamp": "2025-10-08T00:53:44.794903"
+          },
+          {
+            "message_id": "twitter_svin228695_1973059642654601271_5",
+            "timestamp": "2025-10-08T00:53:48.225760"
+          },
+          {
+            "message_id": "twitter_svin228695_1971564774967349473_5",
+            "timestamp": "2025-10-08T00:53:52.164534"
+          },
+          {
+            "message_id": "twitter_svin228695_1971553982150750298_5",
+            "timestamp": "2025-10-08T00:54:03.447455"
+          },
+          {
+            "message_id": "twitter_svin228695_1971273375839670508_5",
+            "timestamp": "2025-10-08T00:54:07.103723"
+          },
+          {
+            "message_id": "twitter_svin228695_1971250691999191119_5",
+            "timestamp": "2025-10-08T00:54:11.161814"
+          },
+          {
+            "message_id": "twitter_svin228695_1970912495658541281_5",
+            "timestamp": "2025-10-08T00:54:15.397557"
+          },
+          {
+            "message_id": "twitter_svin228695_1970900259879403544_5",
+            "timestamp": "2025-10-08T00:54:19.121493"
+          },
+          {
+            "message_id": "twitter_svin228695_1970522938911924474_5",
+            "timestamp": "2025-10-08T00:54:23.275241"
+          },
+          {
+            "message_id": "twitter_svin228695_1970443576963473828_5",
+            "timestamp": "2025-10-08T00:54:27.057430"
+          },
+          {
+            "message_id": "twitter_svin228695_1970167956299817158_5",
+            "timestamp": "2025-10-08T00:54:30.323212"
+          },
+          {
+            "message_id": "twitter_svin228695_1970045116636422342_5",
+            "timestamp": "2025-10-08T00:54:34.094191"
+          },
+          {
+            "message_id": "twitter_svin228695_1969314693970842040_5",
+            "timestamp": "2025-10-08T00:54:37.610915"
+          },
+          {
+            "message_id": "twitter_svin228695_1969097482865918327_5",
+            "timestamp": "2025-10-08T00:54:41.520820"
+          },
+          {
+            "message_id": "twitter_Devisons__1975681072487686187_2",
+            "timestamp": "2025-10-08T00:55:02.896806"
+          },
+          {
+            "message_id": "twitter_Devisons__1975681548482408806_2",
+            "timestamp": "2025-10-08T00:56:23.368024"
+          },
+          {
+            "message_id": "twitter_Devisons__1975681524499423524_2",
+            "timestamp": "2025-10-08T00:56:25.335784"
+          },
+          {
+            "message_id": "twitter_SentientAGI_1975683178107965806_4",
+            "timestamp": "2025-10-08T01:14:10.908065"
+          },
+          {
+            "message_id": "discord_1413243132467871839_1425246070404939786_6",
+            "timestamp": "2025-10-08T01:19:06.154002"
+          },
+          {
+            "message_id": "discord_1413243132467871839_1425249656132079768_6",
+            "timestamp": "2025-10-08T01:33:30.627869"
+          },
+          {
+            "message_id": "discord_1413243132467871839_1425252728115826708_6",
+            "timestamp": "2025-10-08T01:45:36.315448"
+          },
+          {
+            "message_id": "twitter_Devisons__1975695334060744845_2",
+            "timestamp": "2025-10-08T01:51:17.824243"
+          },
+          {
+            "message_id": "twitter_Devisons__1975694961103544763_2",
+            "timestamp": "2025-10-08T01:51:19.800403"
+          },
+          {
+            "message_id": "twitter_Devisons__1975696693153636743_2",
+            "timestamp": "2025-10-08T01:56:46.407080"
+          },
+          {
+            "message_id": "twitter_Devisons__1975697173401440632_2",
+            "timestamp": "2025-10-08T02:00:23.674335"
+          }
+        ]
+      }
+    }
+  },
+  "selenium_accounts": {},
+  "metadata": {
+    "version": "1.0",
+    "created_at": "2025-10-08T00:31:17.949385",
+    "last_updated": "2025-10-08T02:06:11.117380"
+  }
+}

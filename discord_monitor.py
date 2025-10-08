@@ -215,28 +215,20 @@ class DiscordMonitor:
         return images
         
     async def start_monitoring(self, callback_func, interval: int = 15):
-        """Запустити моніторинг з callback функцією (безпечно)"""
+        """Запустити моніторинг з callback функцією (безпечно, фіксований інтервал 15 секунд)"""
         while True:
             try:
                 new_messages = await self.check_new_messages()
-                
                 if new_messages:
-                    # Логуємо для діагностики
                     self.logger.info(f"Знайдено {len(new_messages)} нових повідомлень")
                     if asyncio.iscoroutinefunction(callback_func):
                         await callback_func(new_messages)
                     else:
                         callback_func(new_messages)
-                    
-                # Додаємо випадкову затримку для уникнення підозрілої активності
-                import random
-                random_delay = random.uniform(0.5, 2.0)
-                await asyncio.sleep(interval + random_delay)
-                
+                await asyncio.sleep(15)
             except Exception as e:
                 self.logger.error(f"Помилка в циклі моніторингу: {e}")
-                # При помилці чекаємо довше
-                await asyncio.sleep(interval * 2)
+                await asyncio.sleep(30)
                 
     def get_monitoring_status(self) -> Dict:
         """Отримати статус моніторингу"""

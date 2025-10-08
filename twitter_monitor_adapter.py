@@ -227,68 +227,109 @@ class TwitterMonitorAdapter:
             return None
     
     async def check_new_tweets(self) -> List[Dict]:
-        """Перевірити нові твіти для всіх акаунтів"""
+        """Перевірити нові твіти для всіх акаунтів (паралельно по 3 акаунти)"""
         if not self.api:
             logger.warning("Twitter Monitor API не ініціалізовано")
             return []
             
         new_tweets = []
         
-        for username in self.monitoring_accounts:
+        # Розбиваємо акаунти на групи по 3 для паралельної обробки
+        accounts_list = list(self.monitoring_accounts)
+        batch_size = 3
+        
+        for i in range(0, len(accounts_list), batch_size):
+            batch = accounts_list[i:i + batch_size]
+            logger.info(f"🚀 Обробляємо групу акаунтів: {batch}")
+            
+            # Створюємо задачі для паралельної обробки
+            tasks = []
+            for username in batch:
+                task = asyncio.create_task(self._check_account_tweets(username))
+                tasks.append(task)
+            
+            # Виконуємо задачі паралельно
             try:
-                # Ініціалізуємо множини якщо не існують
-                if username not in self.seen_tweets:
-                    self.seen_tweets[username] = set()
-                if username not in self.sent_tweets:
-                    self.sent_tweets[username] = set()
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
                 
-                tweets = await self.get_user_tweets(username, limit=5)
-                
-                for tweet in tweets:
-                    tweet_id = tweet.get('id')
-                    tweet_text = tweet.get('text', '').strip()
-                    
-                    if tweet_id:
-                        # Перевіряємо чи цей твіт вже був відправлений за ID
-                        if tweet_id in self.sent_tweets[username]:
-                            continue
-                        
-                        # Фільтруємо твіти з невалідними посиланнями
-                        if not self.is_twitter_link_valid(tweet_text, username):
-                            logger.info(f"🚫 Twitter Monitor: Відфільтровано твіт з невалідними посиланнями для {username}")
-                            continue
-                        
-                        # Додаткова перевірка за контентом
-                        if tweet_text:
-                            import hashlib
-                            content_hash = hashlib.md5(f"{username}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
-                            content_key = f"content_{content_hash}"
-                            if content_key in self.sent_tweets[username]:
-                                logger.info(f"Twitter Monitor: контент твіта для {username} вже був відправлений, пропускаємо")
-                                continue
-                            
-                        # Додаємо до нових твітів
-                        if tweet_id not in self.seen_tweets[username]:
-                            logger.info(f"🆕 Twitter Monitor: Знайдено новий твіт від {username}: {tweet_text[:50]}...")
-                            new_tweets.append(tweet)
-                            self.seen_tweets[username].add(tweet_id)
-                            self.sent_tweets[username].add(tweet_id)
-                            
-                            # Додаємо хеш контенту до відправлених
-                            if tweet_text:
-                                import hashlib
-                                content_hash = hashlib.md5(f"{username}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
-                                content_key = f"content_{content_hash}"
-                                self.sent_tweets[username].add(content_key)
+                # Обробляємо результати
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Помилка в паралельній обробці: {result}")
+                    elif isinstance(result, list):
+                        new_tweets.extend(result)
                         
             except Exception as e:
-                logger.error(f"Помилка перевірки твітів для {username}: {e}")
+                logger.error(f"Помилка паралельної обробки групи {batch}: {e}")
+            
+            # Невелика затримка між групами для стабільності
+            if i + batch_size < len(accounts_list):
+                await asyncio.sleep(0.5)
         
         # Зберігаємо оброблені твіти після кожної перевірки
         if new_tweets:
             self.save_seen_tweets()
+            logger.info(f"✅ Знайдено загалом {len(new_tweets)} нових твітів")
                 
         return new_tweets
+    
+    async def _check_account_tweets(self, username: str) -> List[Dict]:
+        """Перевірити твіти для одного акаунта (допоміжна функція для паралельної обробки)"""
+        account_new_tweets = []
+        
+        try:
+            # Ініціалізуємо множини якщо не існують
+            if username not in self.seen_tweets:
+                self.seen_tweets[username] = set()
+            if username not in self.sent_tweets:
+                self.sent_tweets[username] = set()
+            
+            tweets = await self.get_user_tweets(username, limit=5)
+            logger.info(f"📊 Знайдено {len(tweets)} твітів для {username}")
+            
+            for tweet in tweets:
+                tweet_id = tweet.get('id')
+                tweet_text = tweet.get('text', '').strip()
+                
+                if tweet_id:
+                    # Перевіряємо чи цей твіт вже був відправлений за ID
+                    if tweet_id in self.sent_tweets[username]:
+                        continue
+                    
+                    # Фільтруємо твіти з невалідними посиланнями
+                    if not self.is_twitter_link_valid(tweet_text, username):
+                        logger.info(f"🚫 Twitter Monitor: Відфільтровано твіт з невалідними посиланнями для {username}")
+                        continue
+                    
+                    # Додаткова перевірка за контентом
+                    if tweet_text:
+                        import hashlib
+                        content_hash = hashlib.md5(f"{username}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
+                        content_key = f"content_{content_hash}"
+                        if content_key in self.sent_tweets[username]:
+                            logger.info(f"Twitter Monitor: контент твіта для {username} вже був відправлений, пропускаємо")
+                            continue
+                        
+                    # Додаємо до нових твітів (БЕЗ відмітки як відправлений!)
+                    if tweet_id not in self.seen_tweets[username]:
+                        logger.info(f"🆕 Twitter Monitor: Знайдено новий твіт від {username}: {tweet_text[:50]}...")
+                        
+                        # Додаємо хеш контенту для перевірки дублікатів
+                        if tweet_text:
+                            import hashlib
+                            content_hash = hashlib.md5(f"{username}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
+                            content_key = f"content_{content_hash}"
+                            # Зберігаємо content_key в твіті для подальшого використання
+                            tweet['content_key'] = content_key
+                        
+                        account_new_tweets.append(tweet)
+                        
+                        # ВАЖЛИВО: НЕ додаємо до seen_tweets тут! Це буде зроблено після успішної відправки
+                    
+        except Exception as e:
+            logger.error(f"Помилка перевірки твітів для {username}: {e}")
+            
+        return account_new_tweets
     
     def format_tweet_notification(self, tweet: Dict) -> str:
         """Форматувати сповіщення про твіт"""
@@ -406,6 +447,29 @@ class TwitterMonitorAdapter:
         except Exception as e:
             logger.error(f"Помилка завантаження seen_tweets: {e}")
             self.seen_tweets = {}
+    
+    def mark_tweet_as_sent(self, username: str, tweet_id: str, content_key: str = None):
+        """Відмітити твіт як відправлений"""
+        try:
+            if username not in self.seen_tweets:
+                self.seen_tweets[username] = set()
+            
+            self.seen_tweets[username].add(tweet_id)
+            if content_key:
+                self.seen_tweets[username].add(content_key)
+            
+            # Також додаємо до sent_tweets для внутрішньої логіки
+            if username not in self.sent_tweets:
+                self.sent_tweets[username] = set()
+            
+            self.sent_tweets[username].add(tweet_id)
+            if content_key:
+                self.sent_tweets[username].add(content_key)
+                
+            logger.debug(f"Твіт {tweet_id} відмічено як відправлений для {username}")
+            
+        except Exception as e:
+            logger.error(f"Помилка відмітки твіта як відправленого: {e}")
 
 # Приклад використання
 async def main():

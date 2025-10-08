@@ -737,16 +737,15 @@ class TwitterMonitor:
                         'url': tweet.get('url', f"https://twitter.com/{username}")
                     })
                     
-                    # Додаємо твіт до оброблених та відправлених
-                    self.seen_tweets[username].add(tweet_id)
-                    self.sent_tweets[username].add(tweet_id)
-                    
-                    # Додаємо хеш контенту до відправлених
+                    # Додаємо хеш контенту для подальшого використання
                     if tweet_text:
                         import hashlib
                         content_hash = hashlib.md5(f"{username}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
                         content_key = f"content_{content_hash}"
-                        self.sent_tweets[username].add(content_key)
+                        # Зберігаємо content_key в твіті для подальшого використання
+                        new_tweets[-1]['content_key'] = content_key
+                    
+                    # ВАЖЛИВО: НЕ додаємо до seen_tweets тут! Це буде зроблено після успішної відправки
                     
                 # Діагностичне логування
                 if found_new:
@@ -869,3 +868,26 @@ class TwitterMonitor:
         except Exception as e:
             self.logger.error(f"Помилка завантаження seen_tweets: {e}")
             self.seen_tweets = {}
+    
+    def mark_tweet_as_sent(self, username: str, tweet_id: str, content_key: str = None):
+        """Відмітити твіт як відправлений"""
+        try:
+            if username not in self.seen_tweets:
+                self.seen_tweets[username] = set()
+            
+            self.seen_tweets[username].add(tweet_id)
+            if content_key:
+                self.seen_tweets[username].add(content_key)
+            
+            # Також додаємо до sent_tweets для внутрішньої логіки
+            if username not in self.sent_tweets:
+                self.sent_tweets[username] = set()
+            
+            self.sent_tweets[username].add(tweet_id)
+            if content_key:
+                self.sent_tweets[username].add(content_key)
+                
+            self.logger.debug(f"Твіт {tweet_id} відмічено як відправлений для {username}")
+            
+        except Exception as e:
+            self.logger.error(f"Помилка відмітки твіта як відправленого: {e}")

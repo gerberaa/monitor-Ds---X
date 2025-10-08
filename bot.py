@@ -4,8 +4,10 @@ import threading
 import requests
 import tempfile
 import os
+import json
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Set
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
 from security_manager import SecurityManager
@@ -17,10 +19,17 @@ from access_manager import access_manager
 from config import BOT_TOKEN, ADMIN_PASSWORD, SECURITY_TIMEOUT, MESSAGES, DISCORD_AUTHORIZATION, MONITORING_INTERVAL, TWITTER_AUTH_TOKEN, TWITTER_CSRF_TOKEN, TWITTER_MONITORING_INTERVAL
 
 # Налаштування логування - тільки критичні помилки для швидкості
+import logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.ERROR
 )
+
+# Відключаємо детальне логування для Twitter моніторингу
+logging.getLogger('twitter_monitor').setLevel(logging.WARNING)
+logging.getLogger('twitter_monitor_adapter').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # Ініціалізація менеджерів
@@ -292,23 +301,390 @@ def normalize_chat_id(chat_id_value: str) -> str:
     Приймає рядок з цифрами або вже валідний від'ємний chat_id."""
     try:
         val = str(chat_id_value).strip()
+        original_val = val
+        
         if val.startswith('@'):
+            logger.debug(f"🔍 Chat ID {original_val} залишається як username")
             return val  # username, нехай Telegram обробить
         # Якщо вже від'ємний - залишаємо
         if val.startswith('-'):
+            logger.debug(f"🔍 Chat ID {original_val} вже нормалізований")
             return val
         # Якщо це лише цифри (ймовірно, канал/супергрупа, що потребує -100)
         if val.isdigit():
-            return '-100' + val
+            result = '-100' + val
+            logger.debug(f"🔍 Chat ID {original_val} нормалізовано до {result}")
+            return result
+        
+        logger.debug(f"🔍 Chat ID {original_val} залишається без змін")
         return val
-    except Exception:
+    except Exception as e:
+        logger.error(f"❌ Помилка нормалізації chat_id {chat_id_value}: {e}")
         return str(chat_id_value)
 
-# ===================== Визначення отримувачів за проектами =====================
-def get_users_tracking_discord_channel(channel_id: str) -> List[int]:
-    """Повертає список telegram_id користувачів, що мають проект з цим Discord channel_id."""
+def create_project_thread_sync(bot_token: str, chat_id: str, project_name: str, project_tag: str, user_id: str = None) -> Optional[int]:
+    """Синхронно створити thread для проекту в групі"""
     try:
-        tracked_users: List[int] = []
+        # Перевіряємо, чи вже є thread для цього проекту
+        if user_id:
+            existing_thread_id = get_project_thread_id(user_id, project_name, chat_id)
+            if existing_thread_id:
+                logger.info(f"🔍 Знайдено існуючий thread {existing_thread_id} для проекту '{project_name}'")
+                return existing_thread_id
+        
+        # Створюємо тему в групі для цього проекту
+        url = f"https://api.telegram.org/bot{bot_token}/createForumTopic"
+        data = {
+            'chat_id': normalize_chat_id(chat_id),
+            'name': f"{project_tag} {project_name}",
+            'icon_color': 0x6FB9F0,  # Синій колір
+        }
+        
+        response = requests.post(url, data=data, timeout=10)
+        
+        # Додаємо затримку після запиту для уникнення rate limit
+        import time
+        time.sleep(1)  # Зменшено для швидшої роботи
+        
+        logger.info(f"🔧 API запит створення thread: {url}")
+        logger.info(f"🔧 API дані: {data}")
+        logger.info(f"🔧 API відповідь status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"🔧 API відповідь: {result}")
+            if result.get('ok'):
+                thread_id = result['result']['message_thread_id']
+                logger.info(f"✅ Створено thread {thread_id} для проекту '{project_name}' з тегом {project_tag}")
+                
+                # Зберігаємо mapping thread_id для проекту
+                if user_id:
+                    save_project_thread_id(user_id, project_name, chat_id, thread_id)
+                
+                return thread_id
+            else:
+                logger.error(f"❌ Telegram API помилка при створенні thread: {result}")
+                logger.error(f"❌ Можливо канал {chat_id} не є форум групою. Forum топіки можна створювати тільки в форум групах.")
+                return None
+        else:
+            try:
+                result = response.json()
+                logger.error(f"❌ HTTP {response.status_code} при створенні thread: {result}")
+            except:
+                logger.error(f"❌ HTTP {response.status_code} при створенні thread (не JSON відповідь)")
+            return None
+            
+        if response.status_code == 429:
+            logger.warning(f"⚠️ Rate limit при створенні thread, чекаємо 10 секунд...")
+            time.sleep(10)
+            # Повторна спроба після rate limit
+            response2 = requests.post(url, data=data, timeout=10)
+            if response2.status_code == 200:
+                result2 = response2.json()
+                if result2.get('ok'):
+                    thread_id = result2['result']['message_thread_id']
+                    logger.info(f"✅ Створено thread {thread_id} для проекту '{project_name}' після повторної спроби")
+                    
+                    # Зберігаємо mapping thread_id для проекту
+                    if user_id:
+                        save_project_thread_id(user_id, project_name, chat_id, thread_id)
+                    
+                    return thread_id
+            logger.error(f"❌ Не вдалося створити thread після повторної спроби: {response2.status_code}")
+        else:
+            logger.error(f"❌ HTTP помилка при створенні thread: {response.status_code}")
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка створення thread для проекту '{project_name}': {e}")
+        return None
+
+async def create_project_thread(bot_token: str, chat_id: str, project_name: str, project_tag: str, user_id: str = None) -> Optional[int]:
+    """Асинхронно створити thread для проекту в групі"""
+    return create_project_thread_sync(bot_token, chat_id, project_name, project_tag, user_id)
+
+def send_message_to_thread_sync(bot_token: str, chat_id: str, thread_id: int, text: str, project_tag: str = "") -> bool:
+    """Синхронно відправити повідомлення в thread з тегом"""
+    try:
+        # Додаємо тег до початку повідомлення
+        if project_tag and not text.startswith(project_tag):
+            tagged_text = f"{project_tag}\n\n{text}"
+        else:
+            tagged_text = text
+            
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = {
+            'chat_id': normalize_chat_id(chat_id),
+            'message_thread_id': thread_id,
+            'text': tagged_text,
+            'parse_mode': 'HTML'
+        }
+        
+        logger.info(f"🔍 Відправляємо в thread: chat_id={data['chat_id']}, thread_id={thread_id}, текст довжиною {len(tagged_text)} символів")
+        logger.debug(f"🔍 Текст повідомлення: {repr(tagged_text)}")
+        
+        response = requests.post(url, data=data, timeout=10)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('ok'):
+                logger.info(f"✅ Повідомлення відправлено в thread {thread_id} з тегом {project_tag}")
+                # Додаємо затримку після успішної відправки для уникнення rate limit
+                import time
+                time.sleep(0.7)  # Зменшено для швидшої роботи
+                return True
+            else:
+                logger.error(f"❌ Telegram API помилка при відправці в thread: {result}")
+        elif response.status_code == 429:
+            # Обробка rate limit
+            try:
+                error_response = response.json()
+                retry_after = error_response.get('parameters', {}).get('retry_after', 15)
+                logger.warning(f"⚠️ Rate limit при відправці в thread, чекаємо {retry_after} секунд...")
+                import time
+                time.sleep(retry_after + 1)
+                # Повторна спроба
+                response2 = requests.post(url, data=data, timeout=10)
+                if response2.status_code == 200:
+                    result2 = response2.json()
+                    if result2.get('ok'):
+                        logger.info(f"✅ Повідомлення відправлено в thread {thread_id} після повторної спроби")
+                        time.sleep(1)
+                        return True
+                logger.error(f"❌ Не вдалося відправити повідомлення після повторної спроби")
+            except Exception as e:
+                logger.error(f"❌ Помилка обробки rate limit: {e}")
+        else:
+            logger.error(f"❌ HTTP помилка при відправці в thread: {response.status_code}")
+            try:
+                error_response = response.json()
+                logger.error(f"❌ Деталі помилки: {error_response}")
+            except:
+                logger.error(f"❌ Текст відповіді: {response.text}")
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка відправки повідомлення в thread {thread_id}: {e}")
+        return False
+
+async def send_message_to_thread(bot_token: str, chat_id: str, thread_id: int, text: str, project_tag: str = "") -> bool:
+    """Асинхронно відправити повідомлення в thread з тегом"""
+    return send_message_to_thread_sync(bot_token, chat_id, thread_id, text, project_tag)
+
+def send_photo_to_thread_sync(bot_token: str, chat_id: str, thread_id: int, photo_url: str, caption: str = "", project_tag: str = "") -> bool:
+    """Синхронно відправити фото в thread з тегом"""
+    try:
+        # Додаємо тег до початку підпису
+        if project_tag and caption and not caption.startswith(project_tag):
+            tagged_caption = f"{project_tag} {caption}"
+        elif project_tag and not caption:
+            tagged_caption = project_tag
+        else:
+            tagged_caption = caption
+            
+        # Спочатку завантажуємо зображення
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }
+        
+        response = requests.get(photo_url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        # Відправляємо через Telegram API
+        url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+        
+        files = {'photo': ('image.jpg', response.content, 'image/jpeg')}
+        data = {
+            'chat_id': normalize_chat_id(chat_id),
+            'message_thread_id': thread_id,
+            'caption': tagged_caption[:1024] if tagged_caption else '',  # Обмеження Telegram
+            'parse_mode': 'HTML'
+        }
+        
+        response = requests.post(url, files=files, data=data, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('ok'):
+                logger.info(f"✅ Фото відправлено в thread {thread_id} з тегом {project_tag}")
+                # Додаємо затримку після успішної відправки для уникнення rate limit
+                import time
+                time.sleep(1)  # Зменшено для швидшої роботи
+                return True
+            else:
+                logger.error(f"❌ Telegram API помилка при відправці фото в thread: {result}")
+        elif response.status_code == 429:
+            # Обробка rate limit
+            try:
+                error_response = response.json()
+                retry_after = error_response.get('parameters', {}).get('retry_after', 15)
+                logger.warning(f"⚠️ Rate limit при відправці фото в thread, чекаємо {retry_after} секунд...")
+                import time
+                time.sleep(retry_after + 2)
+                # Повторна спроба
+                response2 = requests.post(url, files=files, data=data, timeout=30)
+                if response2.status_code == 200:
+                    result2 = response2.json()
+                    if result2.get('ok'):
+                        logger.info(f"✅ Фото відправлено в thread {thread_id} після повторної спроби")
+                        time.sleep(1.5)
+                        return True
+                logger.error(f"❌ Не вдалося відправити фото після повторної спроби")
+            except Exception as e:
+                logger.error(f"❌ Помилка обробки rate limit для фото: {e}")
+        else:
+            logger.error(f"❌ HTTP помилка при відправці фото в thread: {response.status_code}")
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка відправки фото в thread {thread_id}: {e}")
+        return False
+
+async def send_photo_to_thread(bot_token: str, chat_id: str, thread_id: int, photo_url: str, caption: str = "", project_tag: str = "") -> bool:
+    """Асинхронно відправити фото в thread з тегом"""
+    return send_photo_to_thread_sync(bot_token, chat_id, thread_id, photo_url, caption, project_tag)
+
+def send_message_with_photos_to_thread_sync(bot_token: str, chat_id: str, thread_id: int, text: str, photo_urls: List[str], project_tag: str = "") -> bool:
+    """Синхронно відправити повідомлення з фотографіями в thread (фото в одному повідомленні)"""
+    try:
+        # Додаємо тег до початку повідомлення
+        if project_tag and not text.startswith(project_tag):
+            tagged_text = f"{project_tag}\n\n{text}"
+        else:
+            tagged_text = text
+        
+        if not photo_urls:
+            # Якщо немає фото, відправляємо звичайне повідомлення
+            return send_message_to_thread_sync(bot_token, chat_id, thread_id, tagged_text, project_tag)
+        
+        # Якщо є тільки одне фото, використовуємо sendPhoto з caption
+        if len(photo_urls) == 1:
+            try:
+                # Завантажуємо зображення
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                }
+                
+                response = requests.get(photo_urls[0], headers=headers, timeout=15)
+                response.raise_for_status()
+                
+                # Відправляємо через sendPhoto з текстом як caption
+                url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+                
+                files = {'photo': ('image.jpg', response.content, 'image/jpeg')}
+                data = {
+                    'chat_id': normalize_chat_id(chat_id),
+                    'message_thread_id': thread_id,
+                    'caption': tagged_text[:1024] if tagged_text else '',  # Обмеження Telegram для caption
+                    'parse_mode': 'HTML'
+                }
+                
+                response = requests.post(url, files=files, data=data, timeout=30)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('ok'):
+                        logger.info(f"✅ Повідомлення з фото відправлено в thread {thread_id}")
+                        import time
+                        time.sleep(1.5)
+                        return True
+                elif response.status_code == 429:
+                    # Обробка rate limit
+                    error_response = response.json()
+                    retry_after = error_response.get('parameters', {}).get('retry_after', 15)
+                    logger.warning(f"⚠️ Rate limit, чекаємо {retry_after} секунд...")
+                    import time
+                    time.sleep(retry_after + 2)
+                    # Повторна спроба
+                    response2 = requests.post(url, files=files, data=data, timeout=30)
+                    if response2.status_code == 200:
+                        result2 = response2.json()
+                        if result2.get('ok'):
+                            logger.info(f"✅ Повідомлення з фото відправлено після повторної спроби")
+                            time.sleep(1.5)
+                            return True
+                
+                logger.error(f"❌ Не вдалося відправити повідомлення з фото: {response.status_code}")
+                return False
+                
+            except Exception as e:
+                logger.error(f"❌ Помилка відправки повідомлення з одним фото: {e}")
+                return False
+        
+        else:
+            # Якщо кілька фото, спочатку відправляємо текст, потім медіа-групу
+            # Спочатку відправляємо текстове повідомлення
+            success = send_message_to_thread_sync(bot_token, chat_id, thread_id, tagged_text, "")
+            if not success:
+                return False
+                
+            # Потім відправляємо медіа-групу з фото
+            try:
+                media = []
+                for i, photo_url in enumerate(photo_urls[:10]):  # Telegram дозволяє максимум 10 медіа в групі
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    }
+                    
+                    response = requests.get(photo_url, headers=headers, timeout=15)
+                    response.raise_for_status()
+                    
+                    media.append({
+                        'type': 'photo',
+                        'media': f'attach://photo{i}',
+                        'caption': f'📷 {i+1}/{len(photo_urls)}' if i == 0 else ''  # Caption тільки на першому фото
+                    })
+                
+                url = f"https://api.telegram.org/bot{bot_token}/sendMediaGroup"
+                
+                # Підготовка файлів для відправки
+                files = {}
+                for i, photo_url in enumerate(photo_urls[:10]):
+                    response = requests.get(photo_url, headers=headers, timeout=15)
+                    files[f'photo{i}'] = ('image.jpg', response.content, 'image/jpeg')
+                
+                data = {
+                    'chat_id': normalize_chat_id(chat_id),
+                    'message_thread_id': thread_id,
+                    'media': json.dumps(media)
+                }
+                
+                response = requests.post(url, files=files, data=data, timeout=30)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get('ok'):
+                        logger.info(f"✅ Медіа-група з {len(photo_urls)} фото відправлена в thread {thread_id}")
+                        import time
+                        time.sleep(2)
+                        return True
+                elif response.status_code == 429:
+                    # Обробка rate limit
+                    error_response = response.json()
+                    retry_after = error_response.get('parameters', {}).get('retry_after', 15)
+                    logger.warning(f"⚠️ Rate limit для медіа-групи, чекаємо {retry_after} секунд...")
+                    import time
+                    time.sleep(retry_after + 2)
+                
+                logger.error(f"❌ Не вдалося відправити медіа-групу: {response.status_code}")
+                return False
+                
+            except Exception as e:
+                logger.error(f"❌ Помилка відправки медіа-групи: {e}")
+                return False
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка відправки повідомлення з фотографіями в thread {thread_id}: {e}")
+        return False
+
+# ===================== Визначення отримувачів за проектами =====================
+def get_users_tracking_discord_channel(channel_id: str) -> List[Dict]:
+    """Повертає список даних користувачів і проектів, що мають проект з цим Discord channel_id."""
+    try:
+        tracked_data: List[Dict] = []
         target = (channel_id or '').strip()
         for user_id_str, projects in project_manager.data.get('projects', {}).items():
             for p in projects:
@@ -316,10 +692,13 @@ def get_users_tracking_discord_channel(channel_id: str) -> List[int]:
                     cid = extract_discord_channel_id(p.get('url', ''))
                     if cid == target:
                         try:
-                            tracked_users.append(int(user_id_str))
+                            tracked_data.append({
+                                'user_id': int(user_id_str),
+                                'project': p
+                            })
                         except:
                             pass
-        return tracked_users
+        return tracked_data
     except Exception:
         return []
 
@@ -346,11 +725,48 @@ def get_discord_server_name(channel_id: str, guild_id: str) -> str:
         logger.error(f"Помилка отримання назви Discord сервера: {e}")
         return f"Discord Server ({guild_id})"
 
-# ===================== Визначення отримувачів за проектами =====================
-def get_users_tracking_twitter(username: str) -> List[int]:
-    """Повертає список telegram_id користувачів, що мають проект з цим Twitter username."""
+# ===================== Система збереження mapping'у гілок =====================
+def load_threads_mapping() -> Dict:
+    """Завантажити mapping проектів до thread_id"""
     try:
-        tracked_users: List[int] = []
+        with open('threads_mapping.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_threads_mapping(mapping: Dict) -> None:
+    """Зберегти mapping проектів до thread_id"""
+    try:
+        with open('threads_mapping.json', 'w', encoding='utf-8') as f:
+            json.dump(mapping, f, ensure_ascii=False, indent=2)
+        logger.info(f"💾 Збережено mapping гілок: {len(mapping)} записів")
+    except Exception as e:
+        logger.error(f"❌ Помилка збереження mapping'у гілок: {e}")
+
+def get_project_thread_id(user_id: str, project_name: str, chat_id: str) -> Optional[int]:
+    """Отримати thread_id для проекту"""
+    mapping = load_threads_mapping()
+    key = f"{user_id}_{project_name}_{chat_id}"
+    thread_id = mapping.get(key)
+    if thread_id:
+        logger.debug(f"🔍 Знайдено thread_id для {project_name}: {thread_id}")
+    else:
+        logger.debug(f"🔍 Не знайдено thread_id для {project_name}")
+    return thread_id
+
+def save_project_thread_id(user_id: str, project_name: str, chat_id: str, thread_id: int) -> None:
+    """Зберегти thread_id для проекту"""
+    mapping = load_threads_mapping()
+    key = f"{user_id}_{project_name}_{chat_id}"
+    mapping[key] = thread_id
+    save_threads_mapping(mapping)
+    logger.info(f"💾 Збережено thread_id {thread_id} для проекту {project_name}")
+
+# ===================== Визначення отримувачів за проектами =====================
+def get_users_tracking_twitter(username: str) -> List[Dict]:
+    """Повертає список даних користувачів і проектів, що мають проект з цим Twitter username."""
+    try:
+        tracked_data: List[Dict] = []
         target = (username or '').replace('@', '').strip().lower()
         
         # Додаткове логування для діагностики
@@ -364,14 +780,17 @@ def get_users_tracking_twitter(username: str) -> List[int]:
                         project_username = u.replace('@', '').strip().lower()
                         logger.debug(f"   Порівнюємо '{project_username}' з '{target}' для користувача {user_id_str}")
                         if project_username == target:
-                            tracked_users.append(int(user_id_str))
+                            tracked_data.append({
+                                'user_id': int(user_id_str),
+                                'project': p
+                            })
                             logger.info(f"✅ Знайдено користувача {user_id_str} для Twitter акаунта {target}")
                             break
         
-        if not tracked_users:
+        if not tracked_data:
             logger.warning(f"⚠️ Не знайдено користувачів для Twitter акаунта '{target}' - твіт буде пропущено")
         
-        return tracked_users
+        return tracked_data
     except Exception as e:
         logger.error(f"Помилка в get_users_tracking_twitter для {username}: {e}")
         return []
@@ -479,20 +898,177 @@ async def forward_test_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if not channel_id:
         await update.message.reply_text("❌ Канал не налаштовано. Спробуйте /forward_set_channel або напишіть у каналі: @" + context.bot.username + " ping")
         return
+    
+    # Перевіряємо режим thread'ів
+    forward_status = project_manager.get_forward_status(user_id)
+    use_threads = forward_status.get('use_threads', True)
+    
     try:
-        text = (
-            "✅ Тестове повідомлення пересилання\n\n"
-            "Це перевірка ваших персональних налаштувань."
-        )
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        data = {'chat_id': normalize_chat_id(channel_id), 'text': text}
-        r = requests.post(url, data=data, timeout=5)
-        if r.status_code == 200:
-            await update.message.reply_text("✅ Тест відправлено у ваш канал пересилання.")
+        if use_threads:
+            # Тестування в режимі thread'ів
+            user_projects = project_manager.get_user_projects(user_id)
+            if not user_projects:
+                await update.message.reply_text("❌ У вас немає проектів для тестування thread'ів")
+                return
+            
+            # Беремо перший проект для тесту
+            test_project = user_projects[0]
+            project_id = test_project.get('id')
+            project_name = test_project.get('name', 'Test Project')
+            project_tag = test_project.get('tag', f"#test_{project_id}")
+            
+            # Отримуємо або створюємо thread
+            thread_id = project_manager.get_project_thread(user_id, project_id)
+            
+            if not thread_id:
+                thread_id = create_project_thread_sync(BOT_TOKEN, channel_id, project_name, project_tag, str(user_id))
+                
+                if thread_id:
+                    project_manager.set_project_thread(user_id, project_id, thread_id)
+            
+            if thread_id:
+                test_text = (
+                    f"🧪 **Тестове повідомлення thread'а**\n\n"
+                    f"• Проект: {project_name}\n"
+                    f"• Тег: {project_tag}\n"
+                    f"• Thread ID: {thread_id}\n"
+                    f"• Час: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                    f"✅ Якщо ви бачите це повідомлення в окремій гілці, то все працює правильно!"
+                )
+                
+                success = send_message_to_thread_sync(BOT_TOKEN, channel_id, thread_id, test_text, project_tag)
+                
+                if success:
+                    await update.message.reply_text(f"✅ Тестове повідомлення відправлено в гілку '{project_name}' (Thread {thread_id})")
+                else:
+                    await update.message.reply_text(f"❌ Помилка відправки в thread {thread_id}")
+            else:
+                await update.message.reply_text("❌ Не вдалося створити або знайти thread")
         else:
-            await update.message.reply_text(f"❌ Помилка відправки у канал: {r.status_code}")
+            # Стандартний тест без thread'ів
+            text = (
+                "#test_message\n\n"
+                "✅ Тестове повідомлення пересилання\n\n"
+                "Це перевірка ваших персональних налаштувань в режимі тегів."
+            )
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            data = {'chat_id': normalize_chat_id(channel_id), 'text': text}
+            r = requests.post(url, data=data, timeout=5)
+            if r.status_code == 200:
+                await update.message.reply_text("✅ Тест відправлено у ваш канал пересилання з тегом.")
+            else:
+                await update.message.reply_text(f"❌ Помилка відправки у канал: {r.status_code}")
     except Exception as e:
         await update.message.reply_text(f"❌ Виняток: {e}")
+
+@require_auth  
+async def thread_test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда для тестування конкретного thread'а проекту"""
+    if not update.effective_user or not update.message:
+        return
+        
+    user_id = update.effective_user.id
+    
+    if not context.args:
+        await update.message.reply_text(
+            "🧪 **Тестування гілок проектів**\n\n"
+            "Використання: /thread_test [project_id]\n\n"
+            "Приклади:\n"
+            "• `/thread_test 1` - тест першого проекту\n"
+            "• `/thread_test` - тест всіх проектів\n\n"
+            "Команда створить або знайде гілку для проекту і відправить тестове повідомлення."
+        )
+        return
+    
+    try:
+        project_id = int(context.args[0])
+        project = project_manager.get_project_by_id(user_id, project_id)
+        
+        if not project:
+            await update.message.reply_text(f"❌ Проект з ID {project_id} не знайдено")
+            return
+        
+        forward_channel = project_manager.get_forward_channel(user_id)
+        if not forward_channel:
+            await update.message.reply_text("❌ Канал пересилання не налаштовано")
+            return
+        
+        project_name = project.get('name', 'Test Project')
+        project_tag = project.get('tag', f"#test_{project_id}")
+        
+        # Отримуємо або створюємо thread
+        thread_id = project_manager.get_project_thread(user_id, project_id)
+        
+        if not thread_id:
+            thread_id = create_project_thread_sync(BOT_TOKEN, forward_channel, project_name, project_tag, str(user_id))
+            
+            if thread_id:
+                project_manager.set_project_thread(user_id, project_id, thread_id)
+        
+        if thread_id:
+            test_text = (
+                f"🧪 **Тестування гілки проекту**\n\n"
+                f"• Проект: {project_name}\n"
+                f"• Тег: {project_tag}\n"
+                f"• Платформа: {project.get('platform', 'unknown')}\n"
+                f"• URL: {project.get('url', 'немає')}\n"
+                f"• Thread ID: {thread_id}\n"
+                f"• Час тесту: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+                f"✅ Тест пройшов успішно! Гілка працює правильно."
+            )
+            
+            success = send_message_to_thread_sync(BOT_TOKEN, forward_channel, thread_id, test_text, project_tag)
+            
+            if success:
+                await update.message.reply_text(
+                    f"✅ **Тест успішний!**\n\n"
+                    f"Проект: {project_name}\n"
+                    f"Гілка: {thread_id}\n"
+                    f"Тег: {project_tag}\n\n"
+                    f"Перевірте канал для тестового повідомлення."
+                )
+            else:
+                await update.message.reply_text(f"❌ Помилка відправки в гілку {thread_id}")
+        else:
+            await update.message.reply_text("❌ Не вдалося створити або знайти гілку")
+            
+    except ValueError:
+        await update.message.reply_text("❌ Невірний ID проекту. Використовуйте число.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Помилка: {e}")
+
+@require_auth  
+async def setup_quick_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Швидке налаштування каналу пересилання"""
+    if not update.effective_user or not update.message:
+        return
+        
+    user_id = update.effective_user.id
+    
+    # Перевіряємо чи вже налаштовано
+    current_channel = project_manager.get_forward_channel(user_id)
+    if current_channel:
+        await update.message.reply_text(
+            f"ℹ️ **Канал вже налаштовано**\n\n"
+            f"Поточний канал: `{current_channel}`\n\n"
+            f"🔄 Для зміни каналу:\n"
+            f"1. Створіть нову групу з увімкненими Topics (гілки)\n"
+            f"2. Додайте бота як адміністратора\n"
+            f"3. Напишіть в групі: @{context.bot.username} ping\n\n"
+            f"⚡ Або використайте `/forward_set_channel <ID_каналу>`"
+        )
+        return
+    
+    await update.message.reply_text(
+        f"🚀 **Швидке налаштування каналу пересилання**\n\n"
+        f"📋 **Кроки:**\n"
+        f"1. Створіть нову групу в Telegram\n"
+        f"2. Увімкніть Topics (гілки) в налаштуваннях групи\n"
+        f"3. Додайте цього бота як адміністратора з правами керування повідомленнями\n"
+        f"4. Напишіть в групі: `@{context.bot.username} ping`\n\n"
+        f"✅ Бот автоматично налаштує групу для пересилання!\n\n"
+        f"💡 **Альтернатива:** `/forward_set_channel <ID_каналу>`"
+    )
 
 def cleanup_old_tweets():
     """Очистити старі твіти з глобального відстеження (залишити тільки останні 200)"""
@@ -514,6 +1090,49 @@ def cleanup_old_tweets():
             # Об'єднуємо та оновлюємо
             global_sent_tweets[account] = set(tweet_ids + content_hashes)
             logger.info(f"Очищено старі твіти для {account}, залишено {len(global_sent_tweets[account])} записів")
+
+def reset_seen_tweets():
+    """Очистити всі збережені seen_tweets файли (використовувати обережно!)"""
+    global twitter_monitor, twitter_monitor_adapter
+    
+    try:
+        import os
+        
+        # Очищаємо файли seen_tweets
+        files_to_clear = [
+            "twitter_api_seen_tweets.json",
+            "twitter_monitor_seen_tweets.json"
+        ]
+        
+        for file_path in files_to_clear:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logger.info(f"Видалено файл {file_path}")
+                except Exception as e:
+                    logger.error(f"Помилка видалення файлу {file_path}: {e}")
+        
+        # Очищаємо пам'ять в моніторах
+        if twitter_monitor:
+            twitter_monitor.seen_tweets = {}
+            twitter_monitor.sent_tweets = {}
+            logger.info("Очищено seen_tweets в Twitter Monitor")
+            
+        if twitter_monitor_adapter:
+            twitter_monitor_adapter.seen_tweets = {}
+            twitter_monitor_adapter.sent_tweets = {}
+            logger.info("Очищено seen_tweets в Twitter Monitor Adapter")
+            
+        # Очищаємо глобальний список
+        global_sent_tweets.clear()
+        logger.info("Очищено global_sent_tweets")
+        
+        logger.info("✅ Всі seen_tweets успішно очищено!")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Помилка очищення seen_tweets: {e}")
+        return False
 
 def format_success_message(title: str, message: str, additional_info: str = None) -> str:
     """Форматувати повідомлення про успіх"""
@@ -790,6 +1409,7 @@ def get_discord_channels_keyboard(user_id: int) -> InlineKeyboardMarkup:
 def get_forward_settings_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Створити клавіатуру налаштувань пересилання"""
     forward_status = project_manager.get_forward_status(user_id)
+    use_threads = forward_status.get('use_threads', True)
     
     keyboard = []
     
@@ -799,6 +1419,15 @@ def get_forward_settings_keyboard(user_id: int) -> InlineKeyboardMarkup:
     else:
         keyboard.append([InlineKeyboardButton("🟢 Увімкнути пересилання", callback_data="enable_forward")])
         keyboard.append([InlineKeyboardButton("📝 Встановити канал", callback_data="set_channel")])
+    
+    # Додаємо управління thread'ами
+    threads_text = "🧵 Використовувати теги" if use_threads else "🧵 Використовувати гілки"
+    threads_action = "disable_threads" if use_threads else "enable_threads"
+    keyboard.append([InlineKeyboardButton(threads_text, callback_data=threads_action)])
+    
+    if use_threads and forward_status['enabled']:
+        keyboard.append([InlineKeyboardButton("🧪 Тест гілок", callback_data="test_threads")])
+        keyboard.append([InlineKeyboardButton("🔧 Управління гілками", callback_data="manage_threads")])
     
     keyboard.append([InlineKeyboardButton("🤖 Автоналаштування", callback_data="auto_setup")])
     keyboard.append([InlineKeyboardButton("📊 Статус", callback_data="forward_status")])
@@ -916,7 +1545,8 @@ def get_admin_system_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💾 Бекап та відновлення", callback_data="admin_backup_restore")],
         [InlineKeyboardButton("🔄 Очистити сесії", callback_data="admin_cleanup_sessions")],
         [InlineKeyboardButton("🧹 Очистити кеш", callback_data="admin_clear_cache")],
-        [InlineKeyboardButton("🔧 Налаштування системи", callback_data="admin_system_config")],
+        [InlineKeyboardButton("�️ Очистити seen_tweets", callback_data="admin_clear_seen_tweets")],
+        [InlineKeyboardButton("�🔧 Налаштування системи", callback_data="admin_system_config")],
         [InlineKeyboardButton("⚠️ Скинути систему", callback_data="admin_reset_system")],
         [InlineKeyboardButton("⬅️ Назад до адмін панелі", callback_data="admin_panel")]
     ]
@@ -975,11 +1605,11 @@ def get_admin_stats_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
-def escape_markdown(text: str) -> str:
-    """Екранувати спеціальні символи для Markdown"""
+def escape_html(text: str) -> str:
+    """Екранувати спеціальні символи для HTML"""
     if not text:
         return ""
-    return str(text).replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+    return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 def extract_twitter_username(url: str) -> Optional[str]:
     """Витягти username з Twitter URL або просто username"""
@@ -1196,6 +1826,78 @@ async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id if update.effective_user else None
+    message_text = update.message.text if update.message else None
+    # Додаємо user_id у список пінгованих для Discord, якщо очікується введення
+    if 'awaiting_ping_user_discord' in context.user_data:
+        state = context.user_data['awaiting_ping_user_discord']
+        project_id = state['project_id']
+        if message_text.isdigit():
+            new_uid = message_text.strip()
+            project_manager.add_project_ping_user(user_id, project_id, new_uid)
+            del context.user_data['awaiting_ping_user_discord']
+            project = project_manager.get_project_by_id(user_id, project_id)
+            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+            text = f"👤 <b>Кого пінгувати для Discord-проекту:</b> <b>{project['name']}</b>\n\n"
+            if ping_users:
+                text += "Поточний список user_id для пінгу:\n"
+                for uid2 in ping_users:
+                    text += f"• <code>{uid2}</code>\n"
+            else:
+                text += "Наразі список порожній.\n"
+            text += "\nВи можете додати або видалити user_id для пінгу.\nВведіть user_id для додавання або натисніть кнопку для видалення."
+            keyboard = []
+            for uid2 in ping_users:
+                keyboard.append([InlineKeyboardButton(f"❌ {uid2}", callback_data=f"remove_ping_discord_{project_id}_{uid2}")])
+            keyboard.append([InlineKeyboardButton("➕ Додати user_id", callback_data=f"add_ping_discord_{project_id}")])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"view_discord_{project_id}")])
+            await update.message.reply_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+        elif message_text == "/cancel":
+            del context.user_data['awaiting_ping_user_discord']
+            await update.message.reply_text("Додавання user_id скасовано.")
+        else:
+            await update.message.reply_text("Введіть коректний user_id (число) або /cancel для скасування.")
+        return
+    # Додаємо user_id у список пінгованих, якщо очікується введення
+    if 'awaiting_ping_user' in context.user_data:
+        state = context.user_data['awaiting_ping_user']
+        project_id = state['project_id']
+        # Перевіряємо, що повідомлення містить лише число
+        if message_text.isdigit():
+            new_uid = message_text.strip()
+            project_manager.add_project_ping_user(user_id, project_id, new_uid)
+            del context.user_data['awaiting_ping_user']
+            # Повертаємося до меню пінгів
+            project = project_manager.get_project_by_id(user_id, project_id)
+            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+            text = f"👤 <b>Кого пінгувати для проекту:</b> <b>{project['name']}</b>\n\n"
+            if ping_users:
+                text += "Поточний список user_id для пінгу:\n"
+                for uid2 in ping_users:
+                    text += f"• <code>{uid2}</code>\n"
+            else:
+                text += "Наразі список порожній.\n"
+            text += "\nВи можете додати або видалити user_id для пінгу.\nВведіть user_id для додавання або натисніть кнопку для видалення."
+            keyboard = []
+            for uid2 in ping_users:
+                keyboard.append([InlineKeyboardButton(f"❌ {uid2}", callback_data=f"remove_ping_{project_id}_{uid2}")])
+            keyboard.append([InlineKeyboardButton("➕ Додати user_id", callback_data=f"add_ping_{project_id}")])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"view_twitter_{project_id}")])
+            await update.message.reply_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+        elif message_text == "/cancel":
+            del context.user_data['awaiting_ping_user']
+            await update.message.reply_text("Додавання user_id скасовано.")
+        else:
+            await update.message.reply_text("Введіть коректний user_id (число) або /cancel для скасування.")
+        return
     """Обробник повідомлень"""
     # Перевіряємо чи це повідомлення від користувача (не від каналу)
     if not update.effective_user or not update.message:
@@ -1567,23 +2269,130 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 f"❌ Помилка видалення акаунта: {e}",
                 reply_markup=get_twitter_adapter_accounts_keyboard()
             )
+    elif callback_data.startswith("view_discord_"):
+        project_id = int(callback_data.replace("view_discord_", ""))
+        project = project_manager.get_project_by_id(user_id, project_id)
+        if project:
+            text = f"💬 <b>Discord проект: {project['name']}</b>\n\n"
+            text += f"📝 <b>Опис:</b> {project.get('description', 'Немає опису')}\n"
+            text += f"🔗 <b>URL:</b> {project.get('url', 'Немає URL')}\n"
+            text += f"📅 <b>Створено:</b> {project.get('created_at', 'Невідомо')}\n"
+            text += f"🔄 <b>Статус:</b> {'Активний' if project.get('is_active', True) else 'Неактивний'}"
+            keyboard = [
+                [InlineKeyboardButton("👤 Кого пінгувати", callback_data=f"ping_menu_discord_{project_id}")],
+                [InlineKeyboardButton("❌ Видалити", callback_data=f"delete_discord_{project_id}")],
+                [InlineKeyboardButton("⬅️ Назад", callback_data="discord_projects")]
+            ]
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+    elif callback_data.startswith("ping_menu_discord_"):
+        project_id = int(callback_data.replace("ping_menu_discord_", ""))
+        project = project_manager.get_project_by_id(user_id, project_id)
+        if project:
+            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+            text = f"👤 <b>Кого пінгувати для Discord-проекту:</b> <b>{project['name']}</b>\n\n"
+            if ping_users:
+                text += "Поточний список user_id для пінгу:\n"
+                for uid in ping_users:
+                    text += f"• <code>{uid}</code>\n"
+            else:
+                text += "Наразі список порожній.\n"
+            text += "\nВи можете додати або видалити user_id для пінгу.\nВведіть user_id для додавання або натисніть кнопку для видалення."
+            keyboard = []
+            for uid in ping_users:
+                keyboard.append([InlineKeyboardButton(f"❌ {uid}", callback_data=f"remove_ping_discord_{project_id}_{uid}")])
+            keyboard.append([InlineKeyboardButton("➕ Додати user_id", callback_data=f"add_ping_discord_{project_id}")])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"view_discord_{project_id}")])
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+    elif callback_data.startswith("remove_ping_discord_"):
+        # remove_ping_discord_{project_id}_{uid}
+        parts = callback_data.split("_")
+        project_id = int(parts[3])
+        uid = parts[4]
+        project_manager.remove_project_ping_user(user_id, project_id, uid)
+        project = project_manager.get_project_by_id(user_id, project_id)
+        ping_users = project_manager.get_project_ping_users(user_id, project_id)
+        text = f"👤 <b>Кого пінгувати для Discord-проекту:</b> <b>{project['name']}</b>\n\n"
+        if ping_users:
+            text += "Поточний список user_id для пінгу:\n"
+            for uid2 in ping_users:
+                text += f"• <code>{uid2}</code>\n"
+        else:
+            text += "Наразі список порожній.\n"
+        text += "\nВи можете додати або видалити user_id для пінгу.\nВведіть user_id для додавання або натисніть кнопку для видалення."
+        keyboard = []
+        for uid2 in ping_users:
+            keyboard.append([InlineKeyboardButton(f"❌ {uid2}", callback_data=f"remove_ping_discord_{project_id}_{uid2}")])
+        keyboard.append([InlineKeyboardButton("➕ Додати user_id", callback_data=f"add_ping_discord_{project_id}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"view_discord_{project_id}")])
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+    elif callback_data.startswith("add_ping_discord_"):
+        project_id = int(callback_data.replace("add_ping_discord_", ""))
+        await query.edit_message_text(
+            f"Введіть user_id, якого потрібно додати до списку пінгованих для цього Discord-проекту.\n\nПісля введення, просто надішліть його у чат.\n\n<code>/cancel</code> — скасувати.",
+            parse_mode="HTML"
+        )
+        context.user_data['awaiting_ping_user_discord'] = {'project_id': project_id}
+    elif callback_data.startswith("add_ping_"):
+        # Для Twitter-проектів (аналогічно Discord)
+        project_id = int(callback_data.replace("add_ping_", ""))
+        await query.edit_message_text(
+            f"Введіть user_id, якого потрібно додати до списку пінгованих для цього Twitter-проекту.\n\nПісля введення, просто надішліть його у чат.\n\n<code>/cancel</code> — скасувати.",
+            parse_mode="HTML"
+        )
+        context.user_data['awaiting_ping_user'] = {'project_id': project_id}
     elif callback_data.startswith("view_twitter_"):
         project_id = int(callback_data.replace("view_twitter_", ""))
         project = project_manager.get_project_by_id(user_id, project_id)
         if project:
-            text = f"🐦 **Twitter проект: {project['name']}**\n\n"
-            text += f"📝 **Опис:** {project.get('description', 'Немає опису')}\n"
-            text += f"🔗 **URL:** {project.get('url', 'Немає URL')}\n"
-            text += f"📅 **Створено:** {project.get('created_at', 'Невідомо')}\n"
-            text += f"🔄 **Статус:** {'Активний' if project.get('is_active', True) else 'Неактивний'}"
-            
+            text = f"🐦 <b>Twitter проект: {project['name']}</b>\n\n"
+            text += f"📝 <b>Опис:</b> {project.get('description', 'Немає опису')}\n"
+            text += f"🔗 <b>URL:</b> {project.get('url', 'Немає URL')}\n"
+            text += f"📅 <b>Створено:</b> {project.get('created_at', 'Невідомо')}\n"
+            text += f"🔄 <b>Статус:</b> {'Активний' if project.get('is_active', True) else 'Неактивний'}"
             keyboard = [
+                [InlineKeyboardButton("👤 Кого пінгувати", callback_data=f"ping_menu_{project_id}")],
                 [InlineKeyboardButton("❌ Видалити", callback_data=f"delete_twitter_{project_id}")],
                 [InlineKeyboardButton("⬅️ Назад", callback_data="twitter_projects")]
             ]
             await query.edit_message_text(
                 text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+    elif callback_data.startswith("ping_menu_"):
+        project_id = int(callback_data.replace("ping_menu_", ""))
+        project = project_manager.get_project_by_id(user_id, project_id)
+        if project:
+            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+            text = f"👤 <b>Кого пінгувати для проекту:</b> <b>{project['name']}</b>\n\n"
+            if ping_users:
+                text += "Поточний список user_id для пінгу:\n"
+                for uid in ping_users:
+                    text += f"• <code>{uid}</code>\n"
+            else:
+                text += "Наразі список порожній.\n"
+            text += "\nВи можете додати або видалити user_id для пінгу.\nВведіть user_id для додавання або натисніть кнопку для видалення."
+            keyboard = []
+            for uid in ping_users:
+                keyboard.append([InlineKeyboardButton(f"❌ {uid}", callback_data=f"remove_ping_{project_id}_{uid}")])
+            keyboard.append([InlineKeyboardButton("➕ Додати user_id", callback_data=f"add_ping_{project_id}")])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"view_twitter_{project_id}")])
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
             )
     elif callback_data.startswith("view_discord_"):
         project_id = int(callback_data.replace("view_discord_", ""))
@@ -1782,26 +2591,280 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         forward_status = project_manager.get_forward_status(user_id)
         user_projects = project_manager.get_user_projects(user_id)
         discord_projects = [p for p in user_projects if p['platform'] == 'discord']
+        twitter_projects = [p for p in user_projects if p['platform'] == 'twitter']
+        use_threads = forward_status.get('use_threads', True)
         
         status_text = (
             f"📊 Статус пересилання\n\n"
             f"🔄 Статус: {'✅ Увімкнено' if forward_status['enabled'] else '❌ Вимкнено'}\n"
             f"📺 Канал: {forward_status['channel_id'] or 'Не встановлено'}\n"
-            f"📋 Discord проектів: {len(discord_projects)}\n"
+            f"🧵 Режим: {'Гілки (threads)' if use_threads else 'Теги в каналі'}\n"
+            f"📋 Проектів: Discord {len(discord_projects)}, Twitter {len(twitter_projects)}\n"
             f"🕒 Налаштовано: {forward_status['created_at'][:19] if forward_status['created_at'] else 'Невідомо'}\n\n"
-            f"💡 Сповіщення відправляються тільки в налаштований канал, не в особисті повідомлення.\n\n"
         )
         
-        if forward_status['enabled'] and discord_projects:
-            status_text += "📢 Сповіщення будуть пересилатися з:\n"
-            for project in discord_projects:
-                status_text += f"• {project['name']}\n"
-        elif not discord_projects:
-            status_text += "⚠️ У вас немає Discord проектів для моніторингу."
+        if use_threads:
+            status_text += "🧵 **Режим гілок**: Кожен проект має свою окрему гілку в групі\n"
+            project_threads = forward_status.get('project_threads', {})
+            if project_threads:
+                status_text += f"🔧 Активних гілок: {len(project_threads)}\n"
+        else:
+            status_text += "🏷️ **Режим тегів**: Всі повідомлення в одному каналі з тегами проектів\n"
+        
+        status_text += "\n💡 Сповіщення відправляються тільки в налаштований канал.\n\n"
+        
+        if forward_status['enabled'] and (discord_projects or twitter_projects):
+            status_text += "📢 Сповіщення будуть пересилатися з проектів:\n"
+            for project in discord_projects + twitter_projects:
+                platform_emoji = "💬" if project['platform'] == 'discord' else "🐦"
+                project_tag = project.get('tag', f"#{project['platform']}_project_{project['id']}")
+                status_text += f"• {platform_emoji} {project['name']} ({project_tag})\n"
+        elif not discord_projects and not twitter_projects:
+            status_text += "⚠️ У вас немає проектів для моніторингу."
         
         await query.edit_message_text(
             status_text,
             reply_markup=get_forward_settings_keyboard(user_id)
+        )
+    elif callback_data == "enable_threads":
+        # Увімкнути використання thread'ів
+        forward_status = project_manager.get_forward_status(user_id)
+        if forward_status['enabled']:
+            project_manager.data['settings']['forward_settings'][str(user_id)]['use_threads'] = True
+            project_manager.save_data()
+            await query.edit_message_text(
+                "🧵 **Режим гілок увімкнено!**\n\n"
+                "Тепер кожен проект буде мати свою окрему гілку в групі.\n"
+                "Це дозволяє краще організувати повідомлення та легше їх знаходити.\n\n"
+                "💡 **Переваги гілок:**\n"
+                "• Кожен проект в окремій гілці\n"
+                "• Зручна навігація\n"
+                "• Автоматичне створення гілок\n"
+                "• Теги в назві гілки",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+        else:
+            await query.edit_message_text(
+                "❌ Спочатку увімкніть пересилання та встановіть канал.",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+    elif callback_data == "disable_threads":
+        # Вимкнути використання thread'ів (використовувати теги)
+        forward_status = project_manager.get_forward_status(user_id)
+        if forward_status['enabled']:
+            project_manager.data['settings']['forward_settings'][str(user_id)]['use_threads'] = False
+            project_manager.save_data()
+            await query.edit_message_text(
+                "🏷️ **Режим тегів увімкнено!**\n\n"
+                "Тепер всі повідомлення будуть відправлятися в основний канал з тегами проектів.\n"
+                "Кожне повідомлення буде містити тег проекту на початку.\n\n"
+                "💡 **Переваги тегів:**\n"
+                "• Всі повідомлення в одному каналі\n"
+                "• Легкий пошук за тегами\n"
+                "• Простий інтерфейс\n"
+                "• Сумісність зі старими каналами",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+        else:
+            await query.edit_message_text(
+                "❌ Спочатку увімкніть пересилання та встановіть канал.",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+    elif callback_data == "test_threads":
+        # Тестування thread'ів
+        forward_status = project_manager.get_forward_status(user_id)
+        if not forward_status['enabled']:
+            await query.edit_message_text(
+                "❌ Пересилання не налаштовано",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+            return
+        
+        user_projects = project_manager.get_user_projects(user_id)
+        if not user_projects:
+            await query.edit_message_text(
+                "❌ У вас немає проектів для тестування",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+            return
+        
+        forward_channel = forward_status['channel_id']
+        test_results = []
+        
+        for project in user_projects[:3]:  # Тестуємо перші 3 проекти
+            project_id = project.get('id')
+            project_name = project.get('name', 'Test Project')
+            project_tag = project.get('tag', f"#test_{project_id}")
+            
+            try:
+                # Спробуємо створити або знайти thread
+                thread_id = project_manager.get_project_thread(user_id, project_id)
+                
+                if not thread_id:
+                    thread_id = create_project_thread_sync(BOT_TOKEN, forward_channel, project_name, project_tag, str(user_id))
+                    
+                    if thread_id:
+                        project_manager.set_project_thread(user_id, project_id, thread_id)
+                
+                if thread_id:
+                    # Відправляємо тестове повідомлення в thread
+                    test_text = (
+                        f"🧪 **Тестове повідомлення**\n\n"
+                        f"• Проект: {project_name}\n"
+                        f"• Тег: {project_tag}\n"
+                        f"• Thread ID: {thread_id}\n"
+                        f"• Час: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                        f"✅ Якщо ви бачите це повідомлення, гілка працює правильно!"
+                    )
+                    
+                    success = send_message_to_thread_sync(BOT_TOKEN, forward_channel, thread_id, test_text, project_tag)
+                    
+                    if success:
+                        test_results.append(f"✅ {project_name} (thread {thread_id})")
+                    else:
+                        test_results.append(f"❌ {project_name} - помилка відправки")
+                else:
+                    test_results.append(f"❌ {project_name} - не вдалося створити thread")
+                    
+            except Exception as e:
+                test_results.append(f"❌ {project_name} - помилка: {str(e)[:50]}")
+        
+        result_text = (
+            f"🧪 **Результати тестування гілок**\n\n"
+            f"📊 Протестовано проектів: {len(test_results)}\n\n"
+            + "\n".join(test_results) +
+            f"\n\n💡 Перевірте канал {forward_channel} для тестових повідомлень."
+        )
+        
+        await query.edit_message_text(
+            result_text,
+            reply_markup=get_forward_settings_keyboard(user_id)
+        )
+    elif callback_data == "manage_threads":
+        # Управління thread'ами
+        forward_status = project_manager.get_forward_status(user_id)
+        user_projects = project_manager.get_user_projects(user_id)
+        project_threads = forward_status.get('project_threads', {})
+        
+        threads_info = []
+        for project in user_projects:
+            project_id = str(project.get('id'))
+            project_name = project.get('name', 'Unknown')
+            project_tag = project.get('tag', f"#project_{project_id}")
+            thread_id = project_threads.get(project_id)
+            
+            if thread_id:
+                threads_info.append(f"🧵 {project_name} ({project_tag}) - Thread {thread_id}")
+            else:
+                threads_info.append(f"❌ {project_name} ({project_tag}) - Немає thread'а")
+        
+        if threads_info:
+            threads_text = "\n".join(threads_info[:10])  # Показуємо перші 10
+            if len(threads_info) > 10:
+                threads_text += f"\n... та ще {len(threads_info) - 10} проектів"
+        else:
+            threads_text = "❌ Немає активних гілок"
+        
+        manage_text = (
+            f"🔧 **Управління гілками**\n\n"
+            f"📊 Всього проектів: {len(user_projects)}\n"
+            f"🧵 Активних гілок: {len(project_threads)}\n\n"
+            f"**Список гілок:**\n{threads_text}\n\n"
+            f"💡 Гілки створюються автоматично при появі нових повідомлень."
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Пересоздать все гілки", callback_data="recreate_all_threads")],
+            [InlineKeyboardButton("🧹 Очистити неактивні", callback_data="cleanup_threads")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="forward_settings")]
+        ]
+        
+        await query.edit_message_text(
+            manage_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    elif callback_data == "recreate_all_threads":
+        # Пересоздать все thread'и
+        forward_status = project_manager.get_forward_status(user_id)
+        if not forward_status['enabled']:
+            await query.edit_message_text(
+                "❌ Пересилання не налаштовано",
+                reply_markup=get_forward_settings_keyboard(user_id)
+            )
+            return
+        
+        user_projects = project_manager.get_user_projects(user_id)
+        forward_channel = forward_status['channel_id']
+        
+        # Очищаємо старі thread'и
+        project_manager.data['settings']['forward_settings'][str(user_id)]['project_threads'] = {}
+        
+        created_threads = []
+        errors = []
+        
+        for project in user_projects:
+            project_id = project.get('id')
+            project_name = project.get('name', 'Project')
+            project_tag = project.get('tag', f"#project_{project_id}")
+            
+            try:
+                thread_id = create_project_thread_sync(BOT_TOKEN, forward_channel, project_name, project_tag, str(user_id))
+                
+                if thread_id:
+                    project_manager.set_project_thread(user_id, project_id, thread_id)
+                    created_threads.append(f"✅ {project_name} - Thread {thread_id}")
+                else:
+                    errors.append(f"❌ {project_name} - не вдалося створити")
+                    
+            except Exception as e:
+                errors.append(f"❌ {project_name} - помилка: {str(e)[:30]}")
+        
+        result_text = (
+            f"🔄 **Результати пересоздання гілок**\n\n"
+            f"✅ Створено: {len(created_threads)}\n"
+            f"❌ Помилок: {len(errors)}\n\n"
+        )
+        
+        if created_threads:
+            result_text += "**Створені гілки:**\n" + "\n".join(created_threads[:5])
+            if len(created_threads) > 5:
+                result_text += f"\n... та ще {len(created_threads) - 5}"
+        
+        if errors:
+            result_text += "\n\n**Помилки:**\n" + "\n".join(errors[:3])
+            
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="manage_threads")]]
+        await query.edit_message_text(
+            result_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    elif callback_data == "cleanup_threads":
+        # Очистити неактивні thread'и
+        forward_status = project_manager.get_forward_status(user_id)
+        user_projects = project_manager.get_user_projects(user_id)
+        project_threads = forward_status.get('project_threads', {}).copy()
+        
+        # Визначаємо які thread'и треба залишити
+        active_project_ids = {str(p.get('id')) for p in user_projects}
+        threads_to_remove = []
+        
+        for project_id, thread_id in project_threads.items():
+            if project_id not in active_project_ids:
+                threads_to_remove.append(project_id)
+                project_manager.remove_project_thread(user_id, int(project_id))
+        
+        cleanup_text = (
+            f"🧹 **Очищення гілок завершено**\n\n"
+            f"📊 Всього було thread'ів: {len(project_threads)}\n"
+            f"🗑️ Видалено неактивних: {len(threads_to_remove)}\n"
+            f"✅ Залишилося активних: {len(project_threads) - len(threads_to_remove)}\n\n"
+            f"💡 Видалені thread'и належали проектам, які більше не існують."
+        )
+        
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="manage_threads")]]
+        await query.edit_message_text(
+            cleanup_text,
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
     elif callback_data == "diagnostics":
         diagnostics_text = (
@@ -2832,6 +3895,42 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as e:
             await query.edit_message_text(
                 format_error_message("Помилка очищення кешу", str(e)),
+                reply_markup=get_admin_system_keyboard()
+            )
+    
+    elif callback_data == "admin_clear_seen_tweets":
+        if not access_manager.is_admin(user_id):
+            await query.edit_message_text(
+                format_error_message("Доступ заборонено!", "Тільки адміністратор має доступ до цієї функції."),
+                reply_markup=get_main_menu_keyboard(user_id)
+            )
+            return
+        
+        try:
+            # Викликаємо функцію очищення seen_tweets
+            success = reset_seen_tweets()
+            
+            if success:
+                await query.edit_message_text(
+                    format_success_message(
+                        "Seen_tweets очищено",
+                        "Всі файли з відправленими твітами успішно видалено",
+                        "⚠️ УВАГА: Бот може повторно відправити старі твіти! Використовуйте обережно."
+                    ),
+                    reply_markup=get_admin_system_keyboard()
+                )
+            else:
+                await query.edit_message_text(
+                    format_error_message(
+                        "Помилка очищення", 
+                        "Не всі файли вдалося очистити",
+                        "Перевірте логи для деталей"
+                    ),
+                    reply_markup=get_admin_system_keyboard()
+                )
+        except Exception as e:
+            await query.edit_message_text(
+                format_error_message("Помилка очищення", str(e)),
                 reply_markup=get_admin_system_keyboard()
             )
     
@@ -4602,8 +5701,8 @@ async def handle_channel_ping(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Встановлюємо канал для пересилання
             if project_manager.set_forward_channel(user_id, str(channel_id)):
                 # Відправляємо підтвердження в канал
-                safe_channel_title = escape_markdown(channel_title)
-                safe_username = escape_markdown(username)
+                safe_channel_title = escape_html(channel_title)
+                safe_username = escape_html(username)
                 
                 confirmation_text = (
                     f"✅ **Канал налаштовано для пересилання!**\n\n"
@@ -4781,162 +5880,245 @@ def format_discord_history(messages: List[Dict], channel_name: str, count: int) 
     return header + "\n".join(formatted_messages)
 
 def handle_discord_notifications_sync(new_messages: List[Dict]) -> None:
-    """Обробник нових повідомлень Discord (оптимізована версія)"""
+    """Обробник нових повідомлень Discord з підтримкою thread'ів та тегів"""
     global bot_instance
     
     if not bot_instance:
         return
         
     try:
+        logger.info(f"📨 handle_discord_notifications_sync: отримано {len(new_messages)} Discord повідомлень для обробки")
+        
         # Кеші для оптимізації
-        channel_to_tracked_users: Dict[str, List[int]] = {}
+        channel_to_tracked_data: Dict[str, List[Dict]] = {}
         user_to_forward_channel: Dict[int, str] = {}
         
-        # Швидка обробка повідомлень
+        # Обробляємо кожне повідомлення МИТТЄВО
         for message in new_messages:
-            message_id = message.get('message_id', '')
-            channel_id = message.get('channel_id', '')
-            
-            # Красиве форматування
-            author = escape_markdown(message['author'])
-            content = escape_markdown(message['content'])
-            
-            # Обрізаємо текст якщо він занадто довгий
-            if len(content) > 200:
-                content = content[:200] + "..."
-            
-            # Форматуємо дату
-            timestamp = message.get('timestamp', '')
-            formatted_date = "Не відомо"
-            time_ago = ""
-            
-            if timestamp:
-                try:
-                    from datetime import datetime
-                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                    formatted_date = dt.strftime("%d %B, %H:%M UTC")
-                    time_ago = _get_time_ago(dt)
-                except:
-                    formatted_date = timestamp[:19] if len(timestamp) > 19 else timestamp
-            
-            # Отримуємо інформацію про сервер з URL
-            server_name = "Discord"
             try:
-                # Спробуємо витягти guild_id з URL
-                url_parts = message['url'].split('/')
-                if len(url_parts) >= 5:
-                    guild_id = url_parts[4]
-                    # Отримуємо назву сервера з проекту користувача
-                    server_name = get_discord_server_name(channel_id, guild_id)
-                    logger.info(f"🏷️ Discord сервер для каналу {channel_id}: {server_name}")
-            except Exception as e:
-                logger.error(f"Помилка отримання назви сервера: {e}")
-                pass
+                message_id = message.get('message_id', '')
+                channel_id = message.get('channel_id', '')
             
-            # Отримуємо зображення з повідомлення
-            images = message.get('images', [])
-            
-            forward_text = (
-                f"📢 **Нове повідомлення з Discord**\n"
-                f"• Сервер: {server_name}\n"
-                f"• Автор: {author}\n"
-                f"• Дата: {formatted_date} ({time_ago})\n"
-                f"• Текст: {content}\n"
-                f"🔗 [Перейти до повідомлення]({message['url']})"
-            )
-            
-            # Додаємо інформацію про зображення якщо є
-            if images:
-                forward_text += f"\n📷 Зображень: {len(images)}"
-            
-            # Отримуємо всіх користувачів, які відстежують цей Discord канал
-            if channel_id in channel_to_tracked_users:
-                tracked_users = channel_to_tracked_users[channel_id]
-            else:
-                tracked_users = get_users_tracking_discord_channel(channel_id)
-                channel_to_tracked_users[channel_id] = tracked_users
-
-            # Додаємо детальне логування для діагностики
-            logger.info(f"🔍 Discord канал {channel_id}: знайдено {len(tracked_users)} користувачів: {tracked_users}")
-
-            # Фільтруємо тільки користувачів з налаштованим пересиланням
-            users_with_forwarding: List[int] = []
-            for user_id in tracked_users:
-                if user_id in user_to_forward_channel:
-                    forward_channel = user_to_forward_channel[user_id]
-                else:
-                    forward_channel = project_manager.get_forward_channel(user_id)
-                    user_to_forward_channel[user_id] = forward_channel
+                # Красиве форматування
+                author = escape_html(message['author'])
+                content = escape_html(message['content'])
                 
-                logger.info(f"🔍 Користувач {user_id}: forward_channel = {forward_channel}")
+                # Обрізаємо текст якщо він занадто довгий
+                if len(content) > 200:
+                    content = content[:200] + "..."
                 
-                if forward_channel:
-                    # Очищаємо канал від зайвих символів
-                    clean_channel = forward_channel.split('/')[0] if '/' in forward_channel else forward_channel
-                    users_with_forwarding.append(user_id)
-                    logger.info(f"✅ Користувач {user_id} додано до пересилання (канал: {clean_channel})")
-                else:
-                    logger.info(f"❌ Користувач {user_id} не має налаштованого каналу для пересилання")
-                    
-            logger.info(f"🔍 Discord канал {channel_id}: {len(users_with_forwarding)} користувачів з налаштованим пересиланням")
-            
-            if not users_with_forwarding:
-                logger.info(f"⚠️ Discord канал {channel_id}: немає користувачів з налаштованим пересиланням")
-                continue
-
-            # Не дублювати відправку, якщо кілька користувачів вказали той самий цільовий канал
-            sent_targets: Set[str] = set()
-
-            for user_id in users_with_forwarding:
+                # Форматуємо дату
+                timestamp = message.get('timestamp', '')
+                formatted_date = "Не відомо"
+                time_ago = ""
+                
+                if timestamp:
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        formatted_date = dt.strftime("%d %B, %H:%M UTC")
+                        time_ago = _get_time_ago(dt)
+                    except:
+                        formatted_date = timestamp[:19] if len(timestamp) > 19 else timestamp
+                
+                # Отримуємо інформацію про сервер з URL
+                server_name = "Discord"
+                guild_id = ""
                 try:
-                    # Швидка перевірка каналу
-                    forward_channel = user_to_forward_channel.get(user_id) or project_manager.get_forward_channel(user_id)
-                    if not forward_channel:
-                        continue
-                    
-                    # Очищаємо канал від зайвих символів
-                    clean_channel = forward_channel.split('/')[0] if '/' in forward_channel else forward_channel
-                    
-                    if clean_channel in sent_targets:
-                        # Уже відправлено в цей канал цю подію
-                        continue
-                    
-                    # Швидка перевірка дублікатів
-                    forward_key = f"forward_{channel_id}_{message_id}"
-                    if project_manager.is_message_sent(forward_key, clean_channel, user_id):
-                        continue
-                    
-                    logger.info(f"📤 Відправляємо Discord повідомлення в канал {clean_channel} для користувача {user_id}")
-                    
-                    # Відправляємо текст повідомлення
-                    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                    data = {
-                        'chat_id': normalize_chat_id(clean_channel),
-                        'text': forward_text,
-                    }
-                    response = requests.post(url, data=data, timeout=3)
-                    
-                    if response.status_code == 200:
-                        # Відправляємо зображення якщо є
-                        if images:
-                            for i, image_url in enumerate(images[:5]):  # Максимум 5 зображень
-                                try:
-                                    image_caption = f"📷 Discord зображення {i+1}/{len(images)}" if len(images) > 1 else "📷 Discord зображення"
-                                    download_and_send_image(image_url, clean_channel, image_caption)
-                                    # Невелика затримка між зображеннями
-                                    import time
-                                    time.sleep(1)
-                                except Exception as e:
-                                    logger.error(f"Помилка відправки Discord зображення: {e}")
-                        
-                        project_manager.add_sent_message(forward_key, clean_channel, user_id)
-                        sent_targets.add(clean_channel)
-                        logger.info(f"✅ Переслано в канал {clean_channel} (користувач {user_id})")
-                    else:
-                        logger.error(f"❌ Помилка відправки в канал {clean_channel}: {response.status_code}")
-                    
+                    # Спробуємо витягти guild_id з URL
+                    url_parts = message['url'].split('/')
+                    if len(url_parts) >= 5:
+                        guild_id = url_parts[4]
+                        # Отримуємо назву сервера з проекту користувача
+                        server_name = get_discord_server_name(channel_id, guild_id)
+                        logger.info(f"🏷️ Discord сервер для каналу {channel_id}: {server_name}")
                 except Exception as e:
-                    logger.error(f"Помилка обробки користувача {user_id}: {e}")
+                    logger.error(f"Помилка отримання назви сервера: {e}")
+                    pass
+                
+                # Отримуємо зображення з повідомлення
+                images = message.get('images', [])
+                
+                # Отримуємо всіх користувачів та проекти, які відстежують цей Discord канал
+                if channel_id in channel_to_tracked_data:
+                    tracked_data = channel_to_tracked_data[channel_id]
+                else:
+                    tracked_data = get_users_tracking_discord_channel(channel_id)
+                    channel_to_tracked_data[channel_id] = tracked_data
+
+                # Додаємо детальне логування для діагностики
+                logger.info(f"🔍 Discord канал {channel_id}: знайдено {len(tracked_data)} проектів")
+                for item in tracked_data:
+                    logger.info(f"   📋 Проект: {item['project']['name']} (користувач: {item['user_id']})")
+
+                if not tracked_data:
+                    logger.warning(f"🚫 Discord канал {channel_id}: немає проектів, що відстежують цей канал")
+                    continue
+                
+                logger.info(f"✅ Обробляємо Discord повідомлення {message_id} для {len(tracked_data)} проектів")
+
+                # Не дублювати відправку в одну гілку
+                sent_targets: Set[str] = set()
+
+                for tracked_item in tracked_data:
+                    try:
+                        user_id = tracked_item['user_id']
+                        project = tracked_item['project']
+                        project_id = project.get('id')
+                        project_name = project.get('name', 'Discord Project')
+                        project_tag = project.get('tag', f"#ds_project_{project_id}")
+                        # Швидка перевірка каналу пересилання
+                        if user_id in user_to_forward_channel:
+                            forward_channel = user_to_forward_channel[user_id]
+                        else:
+                            forward_channel = project_manager.get_forward_channel(user_id)
+                            user_to_forward_channel[user_id] = forward_channel
+                        if not forward_channel:
+                            logger.warning(f"🚫 Користувач {user_id} не має налаштованого каналу для пересилання")
+                            logger.warning(f"💡 Підказка: налаштуйте канал пересилання командою /forward_set_channel")
+                            continue
+                        logger.info(f"✅ Користувач {user_id} має канал пересилання: {forward_channel}")
+                        # Очищаємо канал від зайвих символів
+                        clean_channel = forward_channel.split('/')[0] if '/' in forward_channel else forward_channel
+                        # Перевіряємо чи використовуються thread'и
+                        forward_status = project_manager.get_forward_status(user_id)
+                        use_threads = forward_status.get('use_threads', True)
+                        # Формуємо унікальний ключ для цього повідомлення і проекту
+                        forward_key = f"discord_{channel_id}_{message_id}_{project_id}"
+                        if use_threads:
+                            # Робота з thread'ами
+                            thread_id = project_manager.get_project_thread(user_id, project_id)
+                            logger.info(f"🔍 Перевіряємо Discord thread для проекту {project_name}: thread_id = {thread_id}")
+                            if not thread_id:
+                                # Створюємо новий thread
+                                logger.info(f"🔧 Створюємо новий Discord thread для проекту {project_name} в каналі {clean_channel}")
+                                thread_id = create_project_thread_sync(BOT_TOKEN, clean_channel, project_name, project_tag, str(user_id))
+                                if thread_id:
+                                    project_manager.set_project_thread(user_id, project_id, thread_id)
+                                    logger.info(f"✅ Створено Discord thread {thread_id} для проекту {project_name}")
+                                else:
+                                    logger.warning(f"⚠️ Не вдалося створити Discord thread для проекту {project_name}")
+                                    logger.info(f"🔄 Перемикаємося на режим відправки з тегами замість threads")
+                                    # Перемикаємося на режим з тегами
+                                    use_threads = False
+                            else:
+                                logger.info(f"✅ Використовується існуючий Discord thread {thread_id} для проекту {project_name}")
+                            # Унікальний ключ для thread'а
+                            thread_key = f"{clean_channel}_{thread_id}"
+                            if thread_key in sent_targets:
+                                continue
+                            if project_manager.is_message_sent(forward_key, clean_channel, user_id):
+                                continue
+                            # Формуємо пінги для всіх user_id із ping_users
+                            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+                            ping_mentions = ""
+                            if ping_users:
+                                ping_mentions = " ".join([f'<a href="tg://user?id={uid}">@{uid}</a>' for uid in ping_users])
+                            # Формуємо гіперпосилання на власника проекту
+                            user_mention = f'<a href="tg://user?id={user_id}">Користувач</a>'
+                            # Формуємо правильний Discord url
+                            discord_url = message.get('url')
+                            # Якщо url не містить server_id, будуємо вручну
+                            if discord_url and '/channels/' in discord_url:
+                                url_parts = discord_url.split('/')
+                                if len(url_parts) >= 7:
+                                    server_id = url_parts[4]
+                                    channel_id = url_parts[5]
+                                    message_id = url_parts[6]
+                                else:
+                                    server_id = guild_id or ''
+                                    channel_id = channel_id
+                                    message_id = message.get('message_id', '')
+                                discord_url = f"https://discord.com/channels/{server_id}/{channel_id}/{message_id}"
+                            else:
+                                # fallback: будуємо з guild_id, channel_id, message_id
+                                discord_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message.get('message_id','')}"
+                            # Формуємо повідомлення у стилі Twitter + пінги
+                            forward_text = (
+                                f"💬 <b>Нове повідомлення з Discord</b>\n"
+                                f"• Проект: {project_name}\n"
+                                f"• Сервер: {server_name}\n"
+                                f"• Автор: {author} | {user_mention}"
+                            )
+                            if ping_mentions:
+                                forward_text += f"\n• Пінг: {ping_mentions}"
+                            forward_text += (
+                                f"\n• Дата: {formatted_date} ({time_ago})\n"
+                                f"• Текст: {content}\n"
+                                f'🔗 {discord_url}'
+                            )
+                            if images:
+                                forward_text += f"\n📷 Зображень: {len(images)}"
+                            logger.info(f"📤 Відправляємо Discord повідомлення в thread {thread_id} для проекту {project_name} в канал {clean_channel}")
+                            # Відправляємо повідомлення в thread
+                            success = send_message_to_thread_sync(BOT_TOKEN, clean_channel, thread_id, forward_text, project_tag)
+                            logger.info(f"📊 Результат відправки Discord повідомлення в thread {thread_id}: success = {success}")
+                            if success:
+                                # Відправляємо зображення в thread якщо є
+                                if images:
+                                    for i, image_url in enumerate(images[:5]):  # Максимум 5 зображень
+                                        try:
+                                            image_caption = f"📷 Discord зображення {i+1}/{len(images)}" if len(images) > 1 else "📷 Discord зображення"
+                                            send_photo_to_thread_sync(BOT_TOKEN, clean_channel, thread_id, image_url, image_caption, project_tag)
+                                            import time
+                                            time.sleep(1)
+                                        except Exception as e:
+                                            logger.error(f"Помилка відправки Discord зображення в thread: {e}")
+                                project_manager.add_sent_message(forward_key, clean_channel, user_id)
+                                sent_targets.add(thread_key)
+                                logger.info(f"✅ Переслано в thread {thread_id} проекту {project_name}")
+                            else:
+                                logger.error(f"❌ Помилка відправки в thread {thread_id}")
+                        else:
+                            # Стара логіка - відправка в основний канал з тегом
+                            target_key = f"{clean_channel}_{project_tag}"
+                            if target_key in sent_targets:
+                                continue
+                            if project_manager.is_message_sent(forward_key, clean_channel, user_id):
+                                continue
+                            # Формуємо повідомлення з тегом
+                            user_mention = f'<a href="tg://user?id={user_id}">Користувач</a>'
+                            forward_text = (
+                                f"{project_tag}\n\n"
+                                f"💬 <b>Нове повідомлення з Discord</b>\n"
+                                f"• Проект: {project_name}\n"
+                                f"• Сервер: {server_name}\n"
+                                f"• Автор: {author} | {user_mention}\n"
+                                f"• Дата: {formatted_date} ({time_ago})\n"
+                                f"• Текст: {content}\n"
+                                f'🔗 {message["url"]}'
+                            )
+                            if images:
+                                forward_text += f"\n📷 Зображень: {len(images)}"
+                            logger.info(f"📤 Відправляємо Discord повідомлення з тегом {project_tag} в канал {clean_channel}")
+                            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                            data = {
+                                'chat_id': normalize_chat_id(clean_channel),
+                                'text': forward_text,
+                                'parse_mode': 'HTML',
+                            }
+                            response = requests.post(url, data=data, timeout=3)
+                            if response.status_code == 200:
+                                # Відправляємо зображення з тегом якщо є
+                                if images:
+                                    for i, image_url in enumerate(images[:5]):
+                                        try:
+                                            image_caption = f"{project_tag} 📷 Discord зображення {i+1}/{len(images)}" if len(images) > 1 else f"{project_tag} 📷 Discord зображення"
+                                            download_and_send_image(image_url, clean_channel, image_caption)
+                                            import time
+                                            time.sleep(1)
+                                        except Exception as e:
+                                            logger.error(f"Помилка відправки Discord зображення: {e}")
+                                project_manager.add_sent_message(forward_key, clean_channel, user_id)
+                                sent_targets.add(target_key)
+                                logger.info(f"✅ Переслано в канал {clean_channel} з тегом {project_tag}")
+                            else:
+                                logger.error(f"❌ Помилка відправки в канал {clean_channel}: {response.status_code}")
+                    except Exception as e:
+                        logger.error(f"Помилка обробки Discord проекту користувача {user_id}: {e}")
+                    
+            except Exception as e:
+                logger.error(f"Помилка обробки Discord повідомлення {message_id}: {e}")
                     
     except Exception as e:
         logger.error(f"Помилка обробки Discord сповіщень: {e}")
@@ -4956,22 +6138,34 @@ def handle_twitter_notifications_sync(new_tweets: List[Dict]) -> None:
             account = tweet.get('account', '')
             logger.info(f"🔍 Обробляємо твіт {tweet_id} від {account}")
             
-            # Отримуємо всіх користувачів, які відстежують цей Twitter акаунт, та мають ввімкнене пересилання
-            users_with_forwarding: List[int] = []
-            tracked_users = get_users_tracking_twitter(account)
+            # Отримуємо всіх користувачів та проекти, які відстежують цей Twitter акаунт
+            tracked_data = get_users_tracking_twitter(account)
             
-            # ВАЖЛИВО: Якщо немає користувачів які відстежують цей акаунт - пропускаємо твіт
-            if not tracked_users:
-                logger.info(f"🚫 Твіт від {account} пропущено - акаунт не додано до жодного проекту")
+            # ВАЖЛИВО: Якщо немає проектів які відстежують цей акаунт - пропускаємо твіт
+            if not tracked_data:
+                logger.warning(f"🚫 Твіт від {account} пропущено - акаунт не додано до жодного проекту")
                 continue
             
-            for user_id in tracked_users:
+            logger.info(f"✅ Знайдено {len(tracked_data)} проектів для акаунта {account}")
+            
+            # Фільтруємо тільки користувачів з налаштованим пересиланням
+            users_with_forwarding: List[Dict] = []
+            for tracked_item in tracked_data:
+                user_id = tracked_item['user_id']
                 forward_channel = project_manager.get_forward_channel(user_id)
+                logger.info(f"🔍 Перевіряємо користувача {user_id}: forward_channel = {forward_channel}")
                 if forward_channel:
-                    users_with_forwarding.append(user_id)
+                    users_with_forwarding.append(tracked_item)
+                    logger.info(f"✅ Користувач {user_id} має налаштоване пересилання в канал {forward_channel}")
+                else:
+                    logger.warning(f"⚠️ Користувач {user_id} не має налаштованого каналу пересилання")
+            
             if not users_with_forwarding:
-                logger.info(f"🚫 Твіт від {account} пропущено - немає користувачів з налаштованим пересиланням")
+                logger.warning(f"🚫 Твіт від {account} пропущено - немає користувачів з налаштованим пересиланням")
+                logger.warning(f"💡 Підказка: налаштуйте канал пересилання командою /forward_set_channel або через меню бота")
                 continue
+            
+            logger.info(f"✅ Знайдено {len(users_with_forwarding)} користувачів з налаштованим пересиланням для акаунта {account}")
 
             # Глобальна перевірка дублікатів
             if account not in global_sent_tweets:
@@ -4984,30 +6178,27 @@ def handle_twitter_notifications_sync(new_tweets: List[Dict]) -> None:
             
             # Додаткова перевірка за контентом (для випадків коли ID може змінюватися)
             tweet_text = tweet.get('text', '').strip()
-            if tweet_text:
+            # Спочатку перевіряємо чи є готовий content_key з Twitter Monitor Adapter
+            content_key = tweet.get('content_key')
+            if not content_key and tweet_text:
                 # Створюємо хеш контенту для додаткової перевірки
                 import hashlib
                 content_hash = hashlib.md5(f"{account}_{tweet_text}".encode('utf-8')).hexdigest()[:12]
                 content_key = f"content_{content_hash}"
                 
-                # Перевіряємо чи такий контент вже був відправлений
-                if content_key in global_sent_tweets[account]:
-                    logger.info(f"Контент твіта для {account} вже був відправлений (хеш: {content_hash}), пропускаємо")
-                    continue
-                
-                # Додаємо хеш контенту до відправлених
-                global_sent_tweets[account].add(content_key)
+            if content_key and content_key in global_sent_tweets[account]:
+                logger.info(f"Контент твіта для {account} вже був відправлений, пропускаємо")
+                continue
             
-            # Додаємо твіт до глобально відправлених
-            global_sent_tweets[account].add(tweet_id)
+            # ВАЖЛИВО: НЕ додаємо твіт до відправлених ТУТ - тільки після успішної відправки!
             
-            # Періодично очищуємо старі твіти
-            if len(global_sent_tweets[account]) % 50 == 0:  # Кожні 50 твітів
-                cleanup_old_tweets()
+            # Додаємо затримку між обробкою твітів для уникнення rate limit
+            import time
+            time.sleep(10)  # Збільшено для уникнення rate limit
             
             # Красиве форматування
-            author = escape_markdown(tweet.get('author', 'Unknown'))
-            text = escape_markdown(tweet.get('text', ''))
+            author = escape_html(tweet.get('author', 'Unknown'))
+            text = escape_html(tweet.get('text', ''))
             
             # Обрізаємо текст якщо він занадто довгий
             if len(text) > 200:
@@ -5030,68 +6221,237 @@ def handle_twitter_notifications_sync(new_tweets: List[Dict]) -> None:
             # Отримуємо зображення з твіта
             images = tweet.get('images', [])
             
+            # --- Додаємо пінги ---
+            ping_users = project_manager.get_project_ping_users(user_id, project_id) if 'project_id' in locals() else []
+            ping_mentions = " ".join([f'<a href="tg://user?id={uid}">@{uid}</a>' for uid in ping_users]) if ping_users else ""
             forward_text = (
-                f"🐦 **Новий твіт з Twitter**\n"
+                f"🐦 <b>Новий твіт з Twitter</b>\n"
                 f"• Профіль: @{account}\n"
                 f"• Автор: {author}\n"
+            )
+            if ping_mentions:
+                forward_text += f"• Пінг: {ping_mentions}\n"
+            forward_text += (
                 f"• Дата: {formatted_date} ({time_ago})\n"
                 f"• Текст: {text}\n"
-                f"🔗 [Перейти до твіта]({tweet.get('url', '')})"
+                f'🔗 {tweet.get("url", "")}'
             )
-            
             # Додаємо інформацію про зображення якщо є
             if images:
                 forward_text += f"\n📷 Зображень: {len(images)}"
             
-            for user_id in users_with_forwarding:
-                try:
-                    # Швидка перевірка каналу
-                    forward_channel = project_manager.get_forward_channel(user_id)
-                    if not forward_channel:
-                        continue
-                    
-                    # Швидка перевірка дублікатів
-                    forward_key = f"twitter_{account}_{tweet_id}"
-                    if project_manager.is_message_sent(forward_key, forward_channel, user_id):
-                        continue
-                    
-                    # Відправляємо текст повідомлення
-                    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                    data = {
-                        'chat_id': normalize_chat_id(forward_channel),
-                        'text': forward_text,
-                    }
-                    response = requests.post(url, data=data, timeout=3)
-                    
-                    if response.status_code == 200:
-                        logger.info(f"✅ Успішно відправлено твіт {tweet_id} від {account} користувачу {user_id}")
-                        # Відправляємо зображення якщо є
-                        if images:
-                            logger.info(f"📷 Знайдено {len(images)} зображень для відправки в канал {forward_channel}")
-                            for i, image_url in enumerate(images[:5]):  # Максимум 5 зображень
-                                try:
-                                    logger.info(f"📤 Відправляємо зображення {i+1}/{len(images)}: {image_url}")
-                                    image_caption = f"📷 Twitter зображення {i+1}/{len(images)}" if len(images) > 1 else "📷 Twitter зображення"
-                                    success = download_and_send_image(image_url, forward_channel, image_caption)
-                                    if success:
-                                        logger.info(f"✅ Зображення {i+1} успішно відправлено")
-                                    else:
-                                        logger.warning(f"⚠️ Не вдалося відправити зображення {i+1}")
-                                    # Невелика затримка між зображеннями
-                                    import time
-                                    time.sleep(1)
-                                except Exception as e:
-                                    logger.error(f"❌ Помилка відправки Twitter зображення {i+1}: {e}")
-                        else:
-                            logger.info(f"ℹ️ Зображень не знайдено для твіта {tweet_id}")
+            # Не дублювати відправку в одну гілку
+            sent_targets: Set[str] = set()
+            
+            # Флаг для відстеження чи був твіт успішно відправлений хоча б одному користувачу
+            tweet_successfully_sent = False
+
+            # Паралельна обробка користувачів групами по 3
+            batch_size = 3
+            for i in range(0, len(users_with_forwarding), batch_size):
+                batch = users_with_forwarding[i:i + batch_size]
+                
+                # Обробляємо групу користувачів
+                for tracked_item in batch:
+                    try:
+                        user_id = tracked_item['user_id']
+                        project = tracked_item['project']
+                        project_id = project.get('id')
+                        project_name = project.get('name', 'Twitter Project')
+                        project_tag = project.get('tag', f"#tw_project_{project_id}")
                         
-                        project_manager.add_sent_message(forward_key, forward_channel, user_id)
-                        logger.info(f"✅ Переслано Twitter твіт в канал {forward_channel} (користувач {user_id})")
-                    else:
-                        logger.error(f"❌ Помилка відправки Twitter твіта в канал {forward_channel}: {response.status_code}")
+                        # Швидка перевірка каналу пересилання
+                        forward_channel = project_manager.get_forward_channel(user_id)
+                        if not forward_channel:
+                            continue
+                        
+                        # Очищаємо канал від зайвих символів
+                        clean_channel = forward_channel.split('/')[0] if '/' in forward_channel else forward_channel
+                        
+                        # Перевіряємо чи використовуються thread'и
+                        forward_status = project_manager.get_forward_status(user_id)
+                        use_threads = forward_status.get('use_threads', True)
+                        
+                        # Формуємо унікальний ключ для цього твіта і проекту
+                        forward_key = f"twitter_{account}_{tweet_id}_{project_id}"
+                        
+                        if use_threads:
+                            # Робота з thread'ами
+                            thread_id = project_manager.get_project_thread(user_id, project_id)
+                            logger.info(f"🔍 Перевіряємо thread для проекту {project_name}: thread_id = {thread_id}")
+                            
+                            if not thread_id:
+                                # Створюємо новий thread
+                                logger.info(f"🔧 Створюємо новий thread для проекту {project_name} в каналі {clean_channel}")
+                                thread_id = create_project_thread_sync(BOT_TOKEN, clean_channel, project_name, project_tag, str(user_id))
+                                
+                                if thread_id:
+                                    project_manager.set_project_thread(user_id, project_id, thread_id)
+                                    logger.info(f"✅ Створено thread {thread_id} для проекту {project_name}")
+                                else:
+                                    logger.warning(f"⚠️ Не вдалося створити thread для проекту {project_name} в каналі {clean_channel}")
+                                    logger.info(f"🔄 Перемикаємося на режим відправки з тегами замість threads")
+                                    # Перемикаємося на режим з тегами
+                                    use_threads = False
+                            else:
+                                logger.info(f"✅ Використовується існуючий thread {thread_id} для проекту {project_name}")
+                            
+                            # Унікальний ключ для thread'а
+                            thread_key = f"{clean_channel}_{thread_id}"
+                            if thread_key in sent_targets:
+                                continue
+                            
+                            if project_manager.is_message_sent(forward_key, clean_channel, user_id):
+                                continue
+                            
+                            # Формуємо повідомлення для thread'а з пінгуванням user_id
+                            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+                            ping_mentions = " ".join([f'<a href="tg://user?id={uid}">@{uid}</a>' for uid in ping_users]) if ping_users else ""
+                            user_mention = f'<a href="tg://user?id={user_id}">Користувач</a>'
+                            thread_forward_text = (
+                                f"🐦 <b>Новий твіт з Twitter</b> 👤 {user_mention}\n"
+                                f"• Проект: {project_name}\n"
+                                f"• Профіль: @{account}\n"
+                                f"• Автор: {author}\n"
+                            )
+                            if ping_mentions:
+                                thread_forward_text += f"• Пінг: {ping_mentions}\n"
+                            thread_forward_text += (
+                                f"• Дата: {formatted_date} ({time_ago})\n"
+                                f"• Текст: {text}\n"
+                                f'🔗 {tweet.get("url", "")}'
+                            )
+                            if images:
+                                thread_forward_text += f"\n📷 Зображень: {len(images)}"
+                            
+                            logger.info(f"📤 Відправляємо Twitter твіт в thread {thread_id} для проекту {project_name} в канал {clean_channel}")
+                            
+                            # Відправляємо повідомлення з фотографіями в одному повідомленні
+                            if images:
+                                logger.info(f"📷 Знайдено {len(images)} зображень, відправляємо в одному повідомленні")
+                                success = send_message_with_photos_to_thread_sync(BOT_TOKEN, clean_channel, thread_id, thread_forward_text, images, project_tag)
+                            else:
+                                # Якщо немає зображень, відправляємо звичайне повідомлення
+                                logger.info(f"📝 Відправляємо текстове повідомлення в thread {thread_id}")
+                                success = send_message_to_thread_sync(BOT_TOKEN, clean_channel, thread_id, thread_forward_text, project_tag)
+                            
+                            logger.info(f"📊 Результат відправки в thread {thread_id}: success = {success}")
+                            
+                            if success:
+                                project_manager.add_sent_message(forward_key, clean_channel, user_id)
+                                sent_targets.add(thread_key)
+                                tweet_successfully_sent = True
+                                logger.info(f"✅ Переслано Twitter твіт in thread {thread_id} проекту {project_name}")
+                            else:
+                                logger.error(f"❌ Помилка відправки Twitter твіта в thread {thread_id}")
+                        else:
+                            # Стара логіка - відправка в основний канал з тегом
+                            target_key = f"{clean_channel}_{project_tag}"
+                            if target_key in sent_targets:
+                                continue
+                            
+                            if project_manager.is_message_sent(forward_key, clean_channel, user_id):
+                                continue
+                            
+                            # Формуємо повідомлення з тегом і пінгами
+                            ping_users = project_manager.get_project_ping_users(user_id, project_id)
+                            ping_mentions = " ".join([f'<a href="tg://user?id={uid}">@{uid}</a>' for uid in ping_users]) if ping_users else ""
+                            tagged_forward_text = (
+                                f"{project_tag}\n\n"
+                                f"🐦 **Новий твіт з Twitter**\n"
+                                f"• Проект: {project_name}\n"
+                                f"• Профіль: @{account}\n"
+                                f"• Автор: {author}\n"
+                            )
+                            if ping_mentions:
+                                tagged_forward_text += f"• Пінг: {ping_mentions}\n"
+                            tagged_forward_text += (
+                                f"• Дата: {formatted_date} ({time_ago})\n"
+                                f"• Текст: {text}\n"
+                                f"🔗 {tweet.get('url', '')}"
+                            )
+                            if images:
+                                tagged_forward_text += f"\n📷 Зображень: {len(images)}"
+                            
+                            logger.info(f"📤 Відправляємо Twitter твіт з тегом {project_tag} в канал {clean_channel}")
+                            
+                            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                            data = {
+                                'chat_id': normalize_chat_id(clean_channel),
+                                'text': tagged_forward_text,
+                            }
+                            response = requests.post(url, data=data, timeout=3)
+                            
+                            if response.status_code == 200:
+                                # Відправляємо зображення з тегом якщо є
+                                if images:
+                                    logger.info(f"📷 Знайдено {len(images)} зображень для відправки в канал {clean_channel}")
+                                    for i, image_url in enumerate(images[:5]):
+                                        try:
+                                            image_caption = f"{project_tag} 📷 Twitter зображення {i+1}/{len(images)}" if len(images) > 1 else f"{project_tag} 📷 Twitter зображення"
+                                            success = download_and_send_image(image_url, clean_channel, image_caption)
+                                            if success:
+                                                logger.info(f"✅ Зображення {i+1} успішно відправлено з тегом {project_tag}")
+                                            else:
+                                                logger.warning(f"⚠️ Не вдалося відправити зображення {i+1}")
+                                            import time
+                                            time.sleep(0.5)  # Зменшено затримку
+                                        except Exception as e:
+                                            logger.error(f"Помилка відправки Twitter зображення: {e}")
+                                
+                                project_manager.add_sent_message(forward_key, clean_channel, user_id)
+                                sent_targets.add(target_key)
+                                tweet_successfully_sent = True
+                                logger.info(f"✅ Переслано Twitter твіт в канал {clean_channel} з тегом {project_tag}")
+                            else:
+                                logger.error(f"❌ Помилка відправки Twitter твіта в канал {clean_channel}: {response.status_code}")
                     
-                except Exception as e:
-                    logger.error(f"Помилка обробки Twitter користувача {user_id}: {e}")
+                    except Exception as e:
+                        logger.error(f"Помилка обробки Twitter проекту користувача {user_id}: {e}")
+                
+                # Невелика затримка між групами користувачів
+                if i + batch_size < len(users_with_forwarding):
+                    import time
+                    time.sleep(0.2)  # 0.2 секунди між групами
+            
+            # ТІЛЬКИ ПІСЛЯ УСПІШНОЇ ВІДПРАВКИ хоча б одному користувачу додаємо твіт до глобального списку
+            if tweet_successfully_sent:
+                global_sent_tweets[account].add(tweet_id)
+                if content_key:
+                    global_sent_tweets[account].add(content_key)
+                logger.info(f"📝 Твіт {tweet_id} додано до списку відправлених для акаунта {account}")
+                
+                # Також додаємо до Twitter Monitor Adapter якщо він використовується
+                global twitter_monitor_adapter, twitter_monitor
+                if twitter_monitor_adapter:
+                    try:
+                        twitter_monitor_adapter.mark_tweet_as_sent(account, tweet_id, content_key)
+                        logger.debug(f"Твіт {tweet_id} відмічено як відправлений в Twitter Monitor Adapter")
+                    except Exception as e:
+                        logger.error(f"Помилка відмітки твіта в Twitter Monitor Adapter: {e}")
+                
+                # Також додаємо до звичайного Twitter Monitor якщо він використовується  
+                if twitter_monitor:
+                    try:
+                        twitter_monitor.mark_tweet_as_sent(account, tweet_id, content_key)
+                        twitter_monitor.save_seen_tweets()  # Зберігаємо зміни
+                        logger.debug(f"Твіт {tweet_id} відмічено як відправлений в Twitter Monitor")
+                    except Exception as e:
+                        logger.error(f"Помилка відмітки твіта в Twitter Monitor: {e}")
+                
+                # Зберігаємо зміни в Twitter Monitor Adapter
+                if twitter_monitor_adapter:
+                    try:
+                        twitter_monitor_adapter.save_seen_tweets()
+                        logger.debug(f"Збережено зміни в Twitter Monitor Adapter")
+                    except Exception as e:
+                        logger.error(f"Помилка збереження в Twitter Monitor Adapter: {e}")
+                
+                # Періодично очищуємо старі твіти
+                if len(global_sent_tweets[account]) % 50 == 0:  # Кожні 50 твітів
+                    cleanup_old_tweets()
+            else:
+                logger.warning(f"⚠️ Твіт {tweet_id} НЕ додано до списку відправлених - жодна відправка не була успішною")
                     
     except Exception as e:
         logger.error(f"Помилка обробки Twitter сповіщень: {e}")
@@ -5119,7 +6479,7 @@ async def start_discord_monitoring():
             channels_list = list(getattr(discord_monitor, 'channels', []))
             logger.info(f"💬 Запуск Discord моніторингу для каналів: {channels_list}")
             logger.info("🔄 Discord моніторинг активний та працює в фоновому режимі...")
-            await discord_monitor.start_monitoring(handle_discord_notifications_sync, MONITORING_INTERVAL)
+            await discord_monitor.start_monitoring(handle_discord_notifications_sync, 10)
             
     except Exception as e:
         logger.error(f"Помилка моніторингу Discord: {e}")
@@ -5153,24 +6513,32 @@ async def start_twitter_monitoring():
                     new_tweets = await twitter_monitor.check_new_tweets()
                     
                     if new_tweets:
-                        # Конвертуємо формат для сумісності з існуючим кодом
-                        formatted_tweets = []
+                        # Обробляємо кожен твіт ОДРАЗУ після знаходження
                         for tweet in new_tweets:
-                            formatted_tweets.append({
-                                'tweet_id': tweet.get('id', ''),
-                                'account': tweet.get('user', {}).get('screen_name', ''),
-                                'author': tweet.get('user', {}).get('name', ''),
-                                'text': tweet.get('text', ''),
-                                'url': tweet.get('url', ''),
-                                'timestamp': tweet.get('created_at', '')
-                            })
+                            try:
+                                # Конвертуємо формат для сумісності з існуючим кодом
+                                formatted_tweet = {
+                                    'tweet_id': tweet.get('id', ''),
+                                    'account': tweet.get('user', {}).get('screen_name', ''),
+                                    'author': tweet.get('user', {}).get('name', ''),
+                                    'text': tweet.get('text', ''),
+                                    'url': tweet.get('url', ''),
+                                    'timestamp': tweet.get('created_at', '')
+                                }
+                                
+                                # МИТТЄВО відправляємо кожен твіт (масив з 1 елементом)
+                                handle_twitter_notifications_sync([formatted_tweet])
+                                
+                                # Невелика затримка між твітами для уникнення rate limit
+                                await asyncio.sleep(0.5)
+                                
+                            except Exception as e:
+                                logger.error(f"Помилка обробки твіта {tweet.get('id', 'unknown')}: {e}")
                         
-                        # Відправляємо сповіщення
-                        handle_twitter_notifications_sync(formatted_tweets)
-                        logger.info(f"Оброблено {len(formatted_tweets)} нових твітів")
+                        logger.info(f"Twitter API: миттєво оброблено {len(new_tweets)} нових твітів")
                     
-                    # Чекаємо перед наступною перевіркою
-                    await asyncio.sleep(TWITTER_MONITORING_INTERVAL)
+                    # Чекаємо перед наступною перевіркою (швидший моніторинг)
+                    await asyncio.sleep(15)
                     
                 except Exception as e:
                     logger.error(f"Помилка в циклі моніторингу Twitter: {e}")
@@ -5204,25 +6572,34 @@ async def start_twitter_monitor_adapter():
                 new_tweets = await twitter_monitor_adapter.check_new_tweets()
                 
                 if new_tweets:
-                    # Конвертуємо формат для сумісності з існуючим кодом
-                    formatted_tweets = []
+                    # Обробляємо кожен твіт ОДРАЗУ після знаходження
                     for tweet in new_tweets:
-                        formatted_tweets.append({
-                            'tweet_id': tweet.get('id', ''),
-                            'account': tweet.get('user', {}).get('screen_name', ''),
-                            'author': tweet.get('user', {}).get('name', ''),
-                            'text': tweet.get('text', ''),
-                            'url': tweet.get('url', ''),
-                            'timestamp': tweet.get('created_at', ''),
-                            'images': tweet.get('images', [])  # Додаємо зображення!
-                        })
+                        try:
+                            # Конвертуємо формат для сумісності з існуючим кодом
+                            formatted_tweet = {
+                                'tweet_id': tweet.get('id', ''),
+                                'account': tweet.get('user', {}).get('screen_name', ''),
+                                'author': tweet.get('user', {}).get('name', ''),
+                                'text': tweet.get('text', ''),
+                                'url': tweet.get('url', ''),
+                                'timestamp': tweet.get('created_at', ''),
+                                'images': tweet.get('images', []),  # Додаємо зображення!
+                                'content_key': tweet.get('content_key')  # Додаємо content_key якщо є
+                            }
+                            
+                            # МИТТЄВО відправляємо кожен твіт (масив з 1 елементом)
+                            handle_twitter_notifications_sync([formatted_tweet])
+                            
+                            # Невелика затримка між твітами для уникнення rate limit
+                            await asyncio.sleep(0.5)
+                            
+                        except Exception as e:
+                            logger.error(f"Помилка обробки твіта {tweet.get('id', 'unknown')}: {e}")
                     
-                    # Відправляємо сповіщення
-                    handle_twitter_notifications_sync(formatted_tweets)
-                    logger.info(f"Twitter Monitor Adapter: оброблено {len(formatted_tweets)} нових твітів")
+                    logger.info(f"Twitter Monitor Adapter: миттєво оброблено {len(new_tweets)} нових твітів")
                 
-                # Чекаємо перед наступною перевіркою
-                await asyncio.sleep(30)
+                # Чекаємо перед наступною перевіркою (швидше для активного моніторингу)
+                await asyncio.sleep(10)
                 
             except Exception as e:
                 logger.error(f"Помилка в циклі Twitter Monitor Adapter моніторингу: {e}")
@@ -5574,6 +6951,94 @@ async def twitter_remove_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"❌ Акаунт @{username} не знайдено в Twitter Monitor Adapter моніторингу")
 
 @require_auth
+async def test_tweet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Тестова команда для перевірки відправки твітів"""
+    if not update.effective_user or not update.message:
+        return
+    
+    user_id = update.effective_user.id
+    
+    # Створюємо тестовий твіт
+    test_tweet = {
+        'tweet_id': 'test_' + str(int(time.time())),
+        'account': 'irys_xyz',
+        'author': 'Irys',
+        'text': 'Це тестовий твіт для перевірки системи пересилання',
+        'url': 'https://x.com/irys_xyz/status/test',
+        'timestamp': datetime.now().isoformat(),
+        'images': []
+    }
+    
+    try:
+        # Відправляємо тестовий твіт
+        handle_twitter_notifications_sync([test_tweet])
+        await update.message.reply_text("✅ Тестовий твіт відправлено!")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Помилка відправки тестового твіта: {e}")
+
+@require_auth
+async def test_discord_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Тестова команда для перевірки відправки Discord повідомлень"""
+    if not update.effective_user or not update.message:
+        return
+    
+    user_id = update.effective_user.id
+    
+    # Створюємо тестове Discord повідомлення
+    test_message = {
+        'message_id': 'test_' + str(int(time.time())),
+        'channel_id': '1413243132467871839',  # Канал з проекту
+        'author': 'Test User',
+        'content': 'Це тестове повідомлення для перевірки системи Discord пересилання',
+        'url': 'https://discord.com/channels/1408570777275469866/1413243132467871839/test',
+        'timestamp': datetime.now().isoformat(),
+        'images': []
+    }
+    
+    try:
+        # Відправляємо тестове Discord повідомлення
+        handle_discord_notifications_sync([test_message])
+        await update.message.reply_text("✅ Тестове Discord повідомлення відправлено!")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Помилка відправки тестового Discord повідомлення: {e}")
+
+@require_auth  
+async def reset_discord_history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда для очищення історії Discord повідомлень (тільки для адміністратора)"""
+    if not update.effective_user or not update.message:
+        return
+        
+    user_id = update.effective_user.id
+    
+    # Перевіряємо чи користувач є адміністратором
+    if not access_manager.is_admin(user_id):
+        await update.message.reply_text(
+            "❌ **Доступ заборонено!**\n\n"
+            "Тільки адміністратор може очищати історію Discord.",
+        )
+        return
+    
+    try:
+        # Очищаємо історію Discord повідомлень
+        global discord_monitor
+        if discord_monitor:
+            discord_monitor.last_message_ids = {}
+            logger.info("Очищено історію Discord повідомлень")
+        
+        await update.message.reply_text(
+            "✅ **Discord історія очищена**\n\n"
+            "Історія останніх повідомлень Discord очищена. "
+            "Бот може повторно відправити старі повідомлення з Discord каналів!",
+        )
+        
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ **Помилка очищення Discord історії**\n\n{str(e)}",
+        )
+
+@require_auth
 async def remove_discord_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Видалити Discord канал з моніторингу"""
     if not update.effective_user or not update.message:
@@ -5806,6 +7271,43 @@ async def admin_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"❌ **Помилка отримання списку користувачів**\n\n{str(e)}",
             )
 
+async def reset_seen_tweets_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Команда для очищення всіх seen_tweets (тільки для адміністратора)"""
+    if not update.effective_user or not update.message:
+        return
+        
+    user_id = update.effective_user.id
+    
+    # Перевіряємо чи користувач є адміністратором
+    if not access_manager.is_admin(user_id):
+        await update.message.reply_text(
+            "❌ **Доступ заборонено!**\n\n"
+            "Тільки адміністратор може очищати seen_tweets.",
+        )
+        return
+    
+    try:
+        # Викликаємо функцію очищення seen_tweets
+        success = reset_seen_tweets()
+        
+        if success:
+            await update.message.reply_text(
+                "✅ **Seen_tweets очищено**\n\n"
+                "Всі файли з відправленими твітами успішно видалено.\n\n"
+                "⚠️ **УВАГА:** Бот може повторно відправити старі твіти! "
+                "Використовуйте цю команду обережно.",
+            )
+        else:
+            await update.message.reply_text(
+                "❌ **Помилка очищення**\n\n"
+                "Не всі файли вдалося очистити. Перевірте логи для деталей.",
+            )
+        
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ **Помилка очищення seen_tweets**\n\n{str(e)}",
+        )
+
 def main() -> None:
     """Головна функція"""
     global bot_instance
@@ -5845,11 +7347,14 @@ def main() -> None:
     application.add_handler(CommandHandler("forward_status", forward_status_command))
     application.add_handler(CommandHandler("forward_set_channel", forward_set_channel_command))
     application.add_handler(CommandHandler("forward_test", forward_test_command))
+    application.add_handler(CommandHandler("thread_test", thread_test_command))
+    application.add_handler(CommandHandler("setup", setup_quick_command))
     
     # Адміністративні команди
     application.add_handler(CommandHandler("admin_create_user", admin_create_user_command))
     application.add_handler(CommandHandler("admin_create_admin", admin_create_admin_command))
     application.add_handler(CommandHandler("admin_users", admin_users_command))
+    application.add_handler(CommandHandler("reset_seen_tweets", reset_seen_tweets_command))
     
     # Twitter Monitor Adapter команди (основний підхід)
     application.add_handler(CommandHandler("twitter_add", twitter_add_command))
@@ -5857,6 +7362,9 @@ def main() -> None:
     application.add_handler(CommandHandler("twitter_start", twitter_start_command))
     application.add_handler(CommandHandler("twitter_stop", twitter_stop_command))
     application.add_handler(CommandHandler("twitter_remove", twitter_remove_command))
+    application.add_handler(CommandHandler("test_tweet", test_tweet_command))
+    application.add_handler(CommandHandler("test_discord", test_discord_command))
+    application.add_handler(CommandHandler("reset_discord_history", reset_discord_history_command))
     
     application.add_error_handler(error_handler)
     
